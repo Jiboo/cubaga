@@ -1,0 +1,18 @@
+[submodule "deps/meshoptimizer"]
+	path = deps/meshoptimizer
+	url = https://github.com/zeux/meshoptimizer.git
+[submodule "deps/libhut"]
+	path = deps/libhut
+	url = https://github.com/Jiboo/libhut.git
+[submodule "deps/stb"]
+	path = deps/stb
+	url = https://github.com/nothings/stb.git
+[submodule "deps/cgltf"]
+	path = deps/cgltf
+	url = https://github.com/jkuhlmann/cgltf.git
+[submodule "deps/ext-mikktspace"]
+	path = deps/ext-mikktspace
+	url = https://github.com/tcoppex/ext-mikktspace
+[submodule "deps/bc7enc16"]
+	path = deps/bc7enc16
+	url = https://github.com/richgel999/bc7enc16
