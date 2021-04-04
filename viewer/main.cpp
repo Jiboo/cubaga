@@ -32,13 +32,16 @@
 #include <vector>
 
 #include "hut/display.hpp"
-#include "hut/drawable.hpp"
+#include "hut/pipeline.hpp"
 #include "hut/font.hpp"
 #include "hut/window.hpp"
+
+#include "imgui_impl_hut.h"
 
 #include "meshoptimizer.h"
 
 #include "viewer_shaders.hpp"
+#include "viewer_shaders_refl.hpp"
 
 using namespace hut;
 
@@ -46,127 +49,11 @@ struct model_ubo {
   mat4 proj_;
   mat4 view_;
   vec3 camera_;
+  vec3 light_dir_;
 };
 
-namespace hut::details {
-  template<typename T>
-  constexpr static uint normals_offset(uint _column) {
-    return offsetof(typename T::instance, normal_) + sizeof(vec4) * _column;
-  }
-
-  struct axis {
-    using impl = drawable<details::axis>;
-    using ubo = model_ubo;
-
-    struct vertex {
-      vec3 pos_;
-      vec3 color_;
-    };
-
-    struct instance {
-      mat4 transform_;
-    };
-
-    constexpr static uint max_descriptor_sets_ = 1;
-
-    constexpr static std::array<VkDescriptorPoolSize, 1> descriptor_pools_ {
-        VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = max_descriptor_sets_},
-    };
-
-    constexpr static std::array<VkDescriptorSetLayoutBinding, 1> descriptor_bindings_{
-        VkDescriptorSetLayoutBinding{.binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .pImmutableSamplers = nullptr},
-    };
-
-    static void fill_extra_descriptor_writes(impl::descriptor_write_context &) {
-    }
-
-    constexpr static std::array<VkVertexInputBindingDescription, 2> vertices_binding_ = {
-        VkVertexInputBindingDescription{.binding = 0, .stride = sizeof(vertex),   .inputRate = VK_VERTEX_INPUT_RATE_VERTEX},
-        VkVertexInputBindingDescription{.binding = 1, .stride = sizeof(instance), .inputRate = VK_VERTEX_INPUT_RATE_INSTANCE},
-    };
-
-    constexpr static std::array<VkVertexInputAttributeDescription, 6> vertices_description_ {
-        VkVertexInputAttributeDescription{.location = 0, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(vertex, pos_)},
-        VkVertexInputAttributeDescription{.location = 1, .binding = 0, .format = VK_FORMAT_R32G32B32_SFLOAT, .offset = offsetof(vertex, color_)},
-        VkVertexInputAttributeDescription{.location = 2, .binding = 1, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = transform_offset<axis>(0)},
-        VkVertexInputAttributeDescription{.location = 3, .binding = 1, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = transform_offset<axis>(1)},
-        VkVertexInputAttributeDescription{.location = 4, .binding = 1, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = transform_offset<axis>(2)},
-        VkVertexInputAttributeDescription{.location = 5, .binding = 1, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = transform_offset<axis>(3)},
-    };
-
-    constexpr static decltype(hut_shaders::rgb_frag_spv) &frag_bytecode_ = hut_shaders::rgb_frag_spv;
-    constexpr static decltype(viewer_shaders::axis_vert_spv) &vert_bytecode_ = viewer_shaders::axis_vert_spv;
-  };
-
-  struct model {
-    using impl = drawable<hut::details::model, const shared_image &, const shared_image &, const shared_image &, const shared_image &, const shared_sampler &>;
-    using ubo = model_ubo;
-
-    struct instance {
-      u8vec4 color_roughness_;
-      u8vec4 emissive_metallic_;
-      mat4 transform_;
-      mat4 normal_;
-    };
-
-    struct vertex {
-      uint32_t dword0_;
-      uint32_t dword1_;
-      uint32_t dword2_;
-    };
-
-    constexpr static uint max_descriptor_sets_ = 1;
-
-    constexpr static std::array<VkDescriptorPoolSize, 2> descriptor_pools_{
-        VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = max_descriptor_sets_},
-        VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 4*max_descriptor_sets_},
-    };
-
-    constexpr static std::array<VkDescriptorSetLayoutBinding, 5> descriptor_bindings_{
-        VkDescriptorSetLayoutBinding{.binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_VERTEX_BIT, .pImmutableSamplers = nullptr},
-        VkDescriptorSetLayoutBinding{.binding = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .pImmutableSamplers = nullptr},
-        VkDescriptorSetLayoutBinding{.binding = 2, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .pImmutableSamplers = nullptr},
-        VkDescriptorSetLayoutBinding{.binding = 3, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .pImmutableSamplers = nullptr},
-        VkDescriptorSetLayoutBinding{.binding = 4, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, .pImmutableSamplers = nullptr},
-    };
-
-    static void fill_extra_descriptor_writes(impl::descriptor_write_context &_context, const shared_image &_albedo,
-        const shared_image &_emissive, const shared_image &_normals, const shared_image &_orm,
-        const shared_sampler &_sampler) {
-      _context.images_.resize(4);
-      _context.texture(1, _albedo, _sampler);
-      _context.texture(2, _emissive, _sampler);
-      _context.texture(3, _normals, _sampler);
-      _context.texture(4, _orm, _sampler);
-    }
-
-    constexpr static std::array<VkVertexInputBindingDescription, 2> vertices_binding_ = {
-        VkVertexInputBindingDescription{.binding = 0, .stride = sizeof(vertex), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX},
-        VkVertexInputBindingDescription{.binding = 1, .stride = sizeof(instance), .inputRate = VK_VERTEX_INPUT_RATE_INSTANCE},
-    };
-
-    constexpr static std::array<VkVertexInputAttributeDescription, 13> vertices_description_ {
-        VkVertexInputAttributeDescription{.location = 0, .binding = 0, .format = VK_FORMAT_R32_UINT, .offset = offsetof(vertex, dword0_)},
-        VkVertexInputAttributeDescription{.location = 1, .binding = 0, .format = VK_FORMAT_R32_UINT, .offset = offsetof(vertex, dword1_)},
-        VkVertexInputAttributeDescription{.location = 2, .binding = 0, .format = VK_FORMAT_R32_UINT, .offset = offsetof(vertex, dword2_)},
-        VkVertexInputAttributeDescription{.location = 3, .binding = 1, .format = VK_FORMAT_R8G8B8A8_UNORM, .offset = offsetof(instance, color_roughness_)},
-        VkVertexInputAttributeDescription{.location = 4, .binding = 1, .format = VK_FORMAT_R8G8B8A8_UNORM, .offset = offsetof(instance, emissive_metallic_)},
-        VkVertexInputAttributeDescription{.location = 5, .binding = 1, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = transform_offset<model>(0)},
-        VkVertexInputAttributeDescription{.location = 6, .binding = 1, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = transform_offset<model>(1)},
-        VkVertexInputAttributeDescription{.location = 7, .binding = 1, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = transform_offset<model>(2)},
-        VkVertexInputAttributeDescription{.location = 8, .binding = 1, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = transform_offset<model>(3)},
-        VkVertexInputAttributeDescription{.location = 9, .binding = 1, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = normals_offset<model>(0)},
-        VkVertexInputAttributeDescription{.location = 10, .binding = 1, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = normals_offset<model>(1)},
-        VkVertexInputAttributeDescription{.location = 11, .binding = 1, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = normals_offset<model>(2)},
-        VkVertexInputAttributeDescription{.location = 12, .binding = 1, .format = VK_FORMAT_R32G32B32A32_SFLOAT, .offset = normals_offset<model>(3)},
-    };
-
-    constexpr static decltype(viewer_shaders::cubaga_frag_spv) &frag_bytecode_ = viewer_shaders::cubaga_frag_spv;
-    constexpr static decltype(viewer_shaders::cubaga_vert_spv) &vert_bytecode_ = viewer_shaders::cubaga_vert_spv;
-  };
-}
-using axis_d = hut::details::axis::impl;
-using model = hut::details::model::impl;
+using axis_d = pipeline<model_ubo, uint16_t, viewer_shaders::axis_vert_spv_refl, hut_shaders::rgb_frag_spv_refl>;
+using model_d = pipeline<model_ubo, uint16_t, viewer_shaders::model_vert_spv_refl, viewer_shaders::model_frag_spv_refl, const shared_image &, const shared_image &, const shared_image &, const shared_image &, const shared_sampler &>;
 
 mat4 make_mat(vec3 _translate, vec3 _scale) {
   mat4 m(1);
@@ -312,6 +199,10 @@ struct cubaga {
 };
 
 int main(int _argc, char **_argv) {
+  IMGUI_CHECKVERSION();
+  ImGui::SetCurrentContext(ImGui::CreateContext());
+  ImGui::StyleColorsDark();
+
   if (_argc != 4) {
     std::cerr << "usage: <cbr file> <material indice> <mesh indice>" << std::endl;
     return EXIT_FAILURE;
@@ -334,13 +225,22 @@ int main(int _argc, char **_argv) {
 
   display d("cubaga-viewer");
 
-  window w(d);
+  window_params wparams;
+  wparams.flags_ |= window_params::FMULTISAMPLING;
+  wparams.flags_ |= window_params::FDEPTH;
+  window w(d, wparams);
   w.clear_color({1, 1, 1, 1});
   w.title(sstream("cubaga-viewer ") << _argv[1] << " " << _argv[2] << " " << _argv[3]);
 
+  if (!ImGui_ImplHut_Init(&d, &w, true))
+    return EXIT_FAILURE;
+
   auto b = d.alloc_buffer(256*1024*1024);
 
-  auto axis_pipeline = std::make_unique<axis_d>(w, VK_PRIMITIVE_TOPOLOGY_LINE_LIST, VK_COMPARE_OP_NEVER);
+  pipeline_params axis_params;
+  axis_params.topology_ = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+  axis_params.depthCompare_ = VK_COMPARE_OP_ALWAYS;
+  auto axis_pipeline = std::make_unique<axis_d>(w, axis_params);
   auto axis_indices = b->allocate<uint16_t>(6);
   axis_indices->set({0, 1, 2, 3, 4, 5});
   auto axis_instance = b->allocate<axis_d::instance>(1);
@@ -363,31 +263,41 @@ int main(int _argc, char **_argv) {
       throw std::runtime_error("couldn't decode indices");
   }
 
-  auto model_pipeline = std::make_unique<model>(w);
-  auto model_instance = b->allocate<model::instance>(1);
+  auto model_pipeline = std::make_unique<model_d>(w);
+  auto model_instance = b->allocate<model_d::instance>(1);
   auto model_mat = make_mat(cbr_mesh.translate_, cbr_mesh.scale_);
-  model_instance->set(model::instance{
+  model_instance->set(model_d::instance{
     cbr_mat.color_roughness_factor_,
     cbr_mat.emissive_metallic_factor_,
     model_mat,
     glm::transpose(glm::inverse(model_mat))
   });
 
-  auto vertices = b->allocate<model::vertex>(cbr_mesh.vertices_count_);
+  auto vertices = b->allocate<model_d::vertex>(cbr_mesh.vertices_count_);
   {
     auto vertices_updator = vertices->update_raw_indirect(0, vertices->size_bytes());
-    if (meshopt_decodeVertexBuffer(vertices_updator.data(), vertices->size(), sizeof(model::vertex), cbr_data + cbr_mesh.vertices_.offset_, cbr_mesh.vertices_.size_) != 0)
+    if (meshopt_decodeVertexBuffer(vertices_updator.data(), vertices->size(), sizeof(model_d::vertex), cbr_data + cbr_mesh.vertices_.offset_, cbr_mesh.vertices_.size_) != 0)
       throw std::runtime_error("couldn't decode vertices");
   }
 
   auto import_tex = [&d, &cbr, &cbr_data](uint8_t _index, VkFormat _format) {
     auto &tex = cbr.textures_[_index];
-    auto data = std::span<uint8_t>{cbr_data + tex.layout_.offset_, tex.layout_.size_};
-    return image::load_raw(d, tex.extents_, data, _format, VK_IMAGE_TILING_OPTIMAL);
+
+    const size_t lod0_byte_size = tex.extents_.x * tex.extents_.y; // load only lod 0
+    auto data = std::span<uint8_t>{cbr_data + tex.layout_.offset_, lod0_byte_size};
+
+    image_params params;
+    params.size_ = tex.extents_;
+    params.format_ = _format;
+    params.tiling_ = VK_IMAGE_TILING_OPTIMAL;
+    return image::load_raw(d, data, 0, params);
   };
   auto default_tex = [&d] (u8vec3 _color) {
     auto data = std::span<uint8_t>{&_color.x, 3};
-    return image::load_raw(d, {1, 1}, data, VK_FORMAT_R8G8B8_SRGB);
+    image_params params;
+    params.size_ = {1, 1};
+    params.format_ = VK_FORMAT_R8G8B8_SRGB;
+    return image::load_raw(d, data, 3, params);
   };
 
   shared_image albedo = cbr_mat.albedo_ != 0xff ? import_tex(cbr_mat.albedo_, VK_FORMAT_BC7_SRGB_BLOCK) : default_tex({255, 255, 255});
@@ -398,6 +308,7 @@ int main(int _argc, char **_argv) {
   float scale_max = compMax(cbr_mesh.scale_);
   vec3 mesh_center = cbr_mesh.scale_ + cbr_mesh.translate_;
   vec3 orbit_base = vec3(0, 0, scale_max * 2);
+  vec3 light_dir = vec3(-0.7399, -0.6428, -0.1983);
   model_ubo default_ubo{
       perspective(glm::radians(45.0f), w.size().x / (float) w.size().y, 0.001f, 1000.0f),
       lookAt(
@@ -405,17 +316,40 @@ int main(int _argc, char **_argv) {
           vec3(0, 0, 0),
           vec3{0, -1, 0}),
       orbit_base,
+      light_dir
   };
-  shared_ubo<model_ubo> ubo = alloc_ubo(d, b, default_ubo);
+  shared_ref<model_ubo> ubo = d.alloc_ubo(b, default_ubo);
 
   shared_sampler samp = std::make_shared<sampler>(d);
 
-  model_pipeline->bind(0, ubo, albedo, emissive, normals, orm, samp);
-  axis_pipeline->bind(0, ubo);
+  model_pipeline->write(0, ubo, albedo, emissive, normals, orm, samp);
+  axis_pipeline->write(0, ubo);
 
   w.on_draw.connect([&](VkCommandBuffer _buffer) {
     model_pipeline->draw(_buffer, 0, indices, model_instance, vertices);
     axis_pipeline->draw(_buffer, 0, axis_indices, axis_instance, axis_vertices);
+
+    ImGui_ImplHut_NewFrame();
+    ImGui::NewFrame();
+    ImGui::ShowDemoWindow();
+
+    if (ImGui::Begin("Light")) {
+      if (ImGui::DragFloat3("Direction", &light_dir.x, 0.01, -1, 1))
+        ubo->update_subone(0, offsetof(model_ubo, light_dir_), sizeof(vec3), &light_dir);
+    }
+    ImGui::End();
+
+    ImGui::Render();
+    ImGui_ImplHut_RenderDrawData(_buffer, ImGui::GetDrawData());
+
+    return false;
+  });
+
+  w.on_frame.connect([&](display::duration _dt) {
+    d.post([&](auto){
+      w.invalidate(true);
+    });
+
     return false;
   });
 
@@ -425,8 +359,8 @@ int main(int _argc, char **_argv) {
     return false;
   });
 
-  w.on_key.connect([&w](keysym c, bool _press) {
-    if (c == KESCAPE && !_press)
+  w.on_key.connect([&w](keycode, keysym c, bool _press) {
+    if (c == KSYM_ESC && !_press)
       w.close();
     return true;
   });
@@ -481,5 +415,10 @@ int main(int _argc, char **_argv) {
     return true;
   });
 
-  return d.dispatch();
+  int error_code = d.dispatch();
+
+  ImGui_ImplHut_Shutdown();
+  ImGui::DestroyContext();
+
+  return error_code;
 }

@@ -1,3 +1,11 @@
 *build*
 .idea
 .vs
+
+*.glb
+*.cbr
+*.cap
+*.rdc
+
+imgui.ini
+profiling-*.json

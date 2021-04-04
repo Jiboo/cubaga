@@ -3,19 +3,20 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
-layout(binding = 1) uniform sampler2D albedoSampler;
-layout(binding = 2) uniform sampler2D emissiveSampler;
-layout(binding = 3) uniform sampler2D normalsSampler;
-layout(binding = 4) uniform sampler2D ormSampler;
+layout(binding = 1) uniform sampler2D albedo_sampler;
+layout(binding = 2) uniform sampler2D emissive_sampler;
+layout(binding = 3) uniform sampler2D normals_sampler;
+layout(binding = 4) uniform sampler2D orm_sampler;
 
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inCamera;
-layout(location = 2) in vec2 inTexCoord;
-layout(location = 3) in vec4 inColorRoughness;
-layout(location = 4) in vec4 inEmissiveMetallic;
-layout(location = 5) in mat3 inTBN;
+layout(location = 0) in vec2 in_uv;
+layout(location = 1) in vec3 in_pos;
+layout(location = 2) in vec3 in_camera;
+layout(location = 3) in vec3 in_light_dir;
+layout(location = 4) in vec4 in_color_roughness;
+layout(location = 5) in vec4 in_emissive_metallic;
+layout(location = 6) in mat3 in_TBN;
 
-layout(location = 0) out vec4 outColor;
+layout(location = 0) out vec4 out_color;
 
 const float GAMMA = 2.2;
 const float INV_GAMMA = 1.0 / GAMMA;
@@ -27,7 +28,6 @@ struct Light {
     float range;
     vec3 color;
     float intensity;
-    vec3 position;
     float innerConeCos;
     float outerConeCos;
     vec3 padding;
@@ -62,8 +62,8 @@ vec4 SRGBtoLINEAR(vec4 srgbIn) {
 }
 
 vec3 getNormal() {
-    vec3 n = texture(normalsSampler, inTexCoord).rgb;
-    n = normalize(inTBN * (2.0 * n - 1.0));
+    vec3 n = texture(normals_sampler, in_uv).rgb;
+    n = normalize(in_TBN * (2.0 * n - 1.0));
     return n;
 }
 
@@ -146,14 +146,14 @@ vec3 toneMapHejlRichard(vec3 color) {
 void main() {
     vec3 f0 = vec3(0.04);
 
-    vec3 ormSample = texture(ormSampler, inTexCoord).rgb;
+    vec3 ormSample = texture(orm_sampler, in_uv).rgb;
 
-    float perceptualRoughness = ormSample.g * inColorRoughness.w;
-    float metallic = ormSample.b * inEmissiveMetallic.w;
+    float perceptualRoughness = ormSample.g * in_color_roughness.w;
+    float metallic = ormSample.b * in_emissive_metallic.w;
     perceptualRoughness = clamp(perceptualRoughness, 0.0, 1.0);
     metallic = clamp(metallic, 0.0, 1.0);
 
-    vec3 baseColor = SRGBtoLINEAR(texture(albedoSampler, inTexCoord)).rgb * inColorRoughness.rgb;
+    vec3 baseColor = SRGBtoLINEAR(texture(albedo_sampler, in_uv)).rgb * in_color_roughness.rgb;
     vec3 diffuseColor = baseColor * (vec3(1.0) - f0) * (1.0 - metallic);
     vec3 specularColor = mix(f0, baseColor, metallic);
 
@@ -171,16 +171,13 @@ void main() {
         specularColor
     );
 
-    // LIGHTING
-
     vec3 color = vec3(0.0, 0.0, 0.0);
     vec3 normal = getNormal();
-    vec3 view = normalize(inCamera - inPosition);
+    vec3 view = normalize(in_camera - in_pos);
 
     Light defaultLight;
-    defaultLight.direction = vec3(-0.7399, -0.6428, -0.1983);
-    defaultLight.position = vec3(0, 0, 0);
-    defaultLight.color = vec3(1,1,1);
+    defaultLight.direction = in_light_dir;
+    defaultLight.color = vec3(1, 1, 1);
     defaultLight.intensity = 5;
     defaultLight.innerConeCos = cos(0);
     defaultLight.outerConeCos = cos(M_PI / 4);
@@ -190,7 +187,7 @@ void main() {
     float ao = ormSample.r;
     color = color * ao;
 
-    vec3 emissive = SRGBtoLINEAR(texture(emissiveSampler, inTexCoord)).rgb * inEmissiveMetallic.rgb;
+    vec3 emissive = SRGBtoLINEAR(texture(emissive_sampler, in_uv)).rgb * in_emissive_metallic.rgb;
     color += emissive;
-    outColor = vec4(toneMapHejlRichard(color), 1);
+    out_color = vec4(toneMapHejlRichard(color), 1);
 }
