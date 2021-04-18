@@ -16,6 +16,8 @@
 #include <glm/gtx/scalar_multiplication.hpp>
 #include <glm/gtx/vec_swizzle.hpp>
 
+#define CUBAGA_PACKAGER_DEBUG
+
 template<typename T>
 using vector = std::vector<T>;
 template<typename K, typename V>
@@ -43,6 +45,15 @@ struct data_item {
   size_t offset_;
 };
 
+template<typename T>
+inline T align(T _input, unsigned _align) {
+  if (_align == 0)
+    return _input;
+
+  T rest = _input % _align;
+  return _input + (rest ? (_align - rest) : 0);
+}
+
 template<typename TInput, typename TOutput>
 uint8_t *read(uint8_t *_input, TOutput &_dst) {
   static_assert(std::endian::native == std::endian::little);
@@ -63,23 +74,13 @@ uint8_t *read_norm(uint8_t *_input, TOutput &_dst) {
   return _input + sizeof(TInput);
 }
 
-inline void write_uleb128(std::ostream &_os, size_t _val) {
-  do {
-    uint8_t byte = _val & 0x7Fu;
-    _val >>= 7u;
-    if (_val != 0)
-      byte |= 0x80u;
-    _os.put(byte);
-  } while (_val != 0);
-}
-
 inline uint8_t to_u8(float _val) {
   return _val * 255;
 }
 
-inline void write_u16(std::ostream &_os, uint16_t _val) {
+inline void write_u32(std::ostream &_os, uint32_t _val) {
   static_assert(std::endian::native == std::endian::little);
-  _os.write(reinterpret_cast<char*>(&_val), sizeof(uint16_t));
+  _os.write(reinterpret_cast<char*>(&_val), sizeof(uint32_t));
 }
 
 inline void write_float(std::ostream &_os, float _val) {

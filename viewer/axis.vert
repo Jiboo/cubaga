@@ -4,6 +4,9 @@
 layout(binding = 0) uniform UniformBufferObject {
     mat4 proj;
     mat4 view;
+    vec4 camera_pos;
+    vec4 sun_dir;
+    int debug;
 } ubo;
 
 layout(location = 0) in vec3 in_v_pos;

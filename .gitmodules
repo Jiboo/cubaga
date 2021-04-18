@@ -13,6 +13,6 @@
 [submodule "deps/ext-mikktspace"]
 	path = deps/ext-mikktspace
 	url = https://github.com/tcoppex/ext-mikktspace
-[submodule "deps/bc7enc16"]
-	path = deps/bc7enc16
-	url = https://github.com/richgel999/bc7enc16
+[submodule "deps/bc7enc_rdo"]
+	path = deps/bc7enc_rdo
+	url = https://github.com/richgel999/bc7enc_rdo

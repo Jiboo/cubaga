@@ -2,10 +2,12 @@
 .idea
 .vs
 
-*.glb
-*.cbr
-*.cap
-*.rdc
-
-imgui.ini
-profiling-*.json
+/*.glb
+/*.crb
+/*.cap
+/*.rdc
+/*.png
+/*.ktx
+/*.ktx2
+/imgui.ini
+/profiling-*.json

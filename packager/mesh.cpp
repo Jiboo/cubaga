@@ -366,31 +366,30 @@ void mesh::gen_lods() {
 }
 
 size_t mesh::layout(size_t _offset) {
-  encoded_vertices_.offset_ = _offset;
-  size_t size = encoded_vertices_.size_;
+  encoded_vertices_.offset_ = _offset = align(_offset, 16);
+  _offset += encoded_vertices_.size_;
+
   for (auto &lod : encoded_lods_) {
-    lod.data_.offset_ = _offset + size;
-    size += lod.data_.size_;
+    lod.data_.offset_ = _offset = align(_offset, 16);
+    _offset += lod.data_.size_;
   }
-  return size;
+
+  return _offset;
 }
 
 void mesh::dump(context &_ctx, std::ostream &_os) {
   write_vec3(_os, translate_);
   write_vec3(_os, scale_);
-  write_u16(_os, vertices_count_);
-  write_uleb128(_os, encoded_vertices_.size_);
-  write_uleb128(_os, encoded_vertices_.offset_);
-  size_t offset = encoded_vertices_.offset_;
-  memcpy(_ctx.data_.get() + offset, encoded_vertices_.data_.get(), encoded_vertices_.size_);
-  offset += encoded_vertices_.size_;
+  write_u32(_os, vertices_count_);
+  write_u32(_os, encoded_vertices_.offset_);
+  write_u32(_os, encoded_vertices_.size_);
+  memcpy(_ctx.data_.get() + encoded_vertices_.offset_, encoded_vertices_.data_.get(), encoded_vertices_.size_);
 
-  _os.put((uint8_t)encoded_lods_.size());
+  write_u32(_os, encoded_lods_.size());
   for (auto &lod : encoded_lods_) {
-    write_uleb128(_os, lod.indices_count_);
-    write_uleb128(_os, lod.data_.size_);
-    write_uleb128(_os, lod.data_.offset_);
-    memcpy(_ctx.data_.get() + offset, lod.data_.data_.get(), lod.data_.size_);
-    offset += lod.data_.size_;
+    write_u32(_os, lod.indices_count_);
+    write_u32(_os, lod.data_.offset_);
+    write_u32(_os, lod.data_.size_);
+    memcpy(_ctx.data_.get() + lod.data_.offset_, lod.data_.data_.get(), lod.data_.size_);
   }
 }

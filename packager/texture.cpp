@@ -6,7 +6,7 @@
 #include "stb_image.h"
 #include "stb_image_resize.h"
 
-#include "bc7enc16.h"
+#include "rdo_bc_encoder.h"
 
 #ifdef CUBAGA_DEBUG
 #include <fstream>
@@ -19,11 +19,11 @@ void stbi_free(pixel_t *_data) {
   stbi_image_free(_data);
 }
 
-void texture::import(context &_ctx, const cgltf_texture &_input, bool _srgb) {
-  *this = std::move(import(_input, _srgb));
+void texture::import(context &_ctx, const cgltf_texture &_input, target_format _format) {
+  *this = std::move(import(_input, _format));
 }
 
-texture texture::import(uint8_t *_buffer, size_t _size, bool _srgb) {
+texture texture::import(uint8_t *_buffer, size_t _size, target_format _format) {
   texture result {};
   int xraw, yraw, channels;
   if (stbi_info_from_memory(_buffer, _size, &xraw, &yraw, &channels) == 0)
@@ -32,6 +32,11 @@ texture texture::import(uint8_t *_buffer, size_t _size, bool _srgb) {
   if (!std::has_single_bit(unsigned(xraw)) || !std::has_single_bit(unsigned(yraw)))
     throw error("image size not power of 2");
 
+  if ((_format == BC7_SRGB || _format == BC7_UNORM) && channels != 3)
+    throw error("unexpected number of channels");
+  /*if ((_format == BC5_UNORM) && channels != 2)
+    throw error("unexpected number of channels");*/
+
   auto *decodedraw = reinterpret_cast<pixel_t*>(stbi_load_from_memory(_buffer, _size, &xraw, &yraw, &channels, 4));
   if (decodedraw == nullptr)
     throw error("couldn't decode image");
@@ -39,7 +44,7 @@ texture texture::import(uint8_t *_buffer, size_t _size, bool _srgb) {
   uptr<pixel_t> decoded {decodedraw, &stbi_free};
   int xresized, yresized;
 
-#if defined(CUBAGA_DEBUG) && 0
+#if defined(CUBAGA_PACKAGER_DEBUG) && 1
   stbi_write_png("debug.png", xraw, yraw, 4, decoded.get(), 0);
 #endif
 
@@ -55,7 +60,7 @@ texture texture::import(uint8_t *_buffer, size_t _size, bool _srgb) {
     result.raw_.reset(new pixel_t[yraw * xraw]);
 
     int resize_result;
-    if (_srgb && false) {
+    if (_format == BC7_SRGB && false) {
       resize_result = stbir_resize_uint8_srgb(reinterpret_cast<uint8_t *>(decoded.get()), xraw, yraw, 0,
           reinterpret_cast<uint8_t *>(result.raw_.get()), xresized, yresized, 0, 4, 0, 0);
     }
@@ -72,17 +77,17 @@ texture texture::import(uint8_t *_buffer, size_t _size, bool _srgb) {
     result.raw_.reset(decoded.release());
   }
 
-  result.srgb_ = _srgb;
+  result.format_ = _format;
   result.size_ = {xresized, yresized};
 
-#if defined(CUBAGA_DEBUG) && 0
+#if defined(CUBAGA_PACKAGER_DEBUG) && 1
   stbi_write_png("debug.png", result.size_.x, result.size_.y, 4, result.raw_.get(), 0);
 #endif
 
   return result;
 }
 
-texture texture::import(const cgltf_texture &_input, bool _srgb) {
+texture texture::import(const cgltf_texture &_input, target_format _format) {
   if (_input.image == nullptr)
     throw error("no image in texture");
 
@@ -93,7 +98,7 @@ texture texture::import(const cgltf_texture &_input, bool _srgb) {
   if (_input.sampler != nullptr && (_input.sampler->wrap_s != 10497 || _input.sampler->wrap_t != 10497))
     throw error("sampler isn't in repeat mode");
 
-  return import((uint8_t*)buffer.buffer->data + buffer.offset, buffer.size, _srgb);
+  return import((uint8_t*)buffer.buffer->data + buffer.offset, buffer.size, _format);
 }
 
 void texture::merge(texture &_other, pixel_t _other_mask, pixel_t _this_mask) {
@@ -122,126 +127,85 @@ void texture::update(pixel_t _mask, pixel_t _add) {
 }
 
 void texture::process(context &_ctx) {
-  unsigned byte_size = 0;
-  unsigned mip_levels = 0;
-  glm::uvec2 size = size_;
-  while (size.x >= 4 && size.y >= 4) {
-    byte_size += size.x * size.y;
-    size /= 2;
-    mip_levels++;
-  }
+  const uint min_extent = std::min(size_.x, size_.y);
+  const uint levels = floor(std::log2(min_extent)) - 1;
+  unique_ptr<pixel_t[]> resized {new pixel_t[size_.x * size_.y]};
 
-#if defined(CUBAGA_DEBUG) && 0
-  stbi_write_png("debug.png", size_.x, size_.y, 4, raw_.get(), 0);
-
-  std::ofstream debug_ktx("debug.ktx", std::ios::binary);
-  uint8_t ktx_FileIdentifier[] = {0xAB, 0x4B, 0x54, 0x58, 0x20, 0x31, 0x31, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A};
-  debug_ktx.write((char*)ktx_FileIdentifier, sizeof(ktx_FileIdentifier));
-  uint32_t ktx_buffer = 0x04030201;
-  debug_ktx.write((char*)&ktx_buffer, sizeof(ktx_buffer)); // endianness
-  ktx_buffer = 0;
-  debug_ktx.write((char*)&ktx_buffer, sizeof(ktx_buffer)); // glType
-  debug_ktx.write((char*)&ktx_buffer, sizeof(ktx_buffer)); // glTypeSize
-  debug_ktx.write((char*)&ktx_buffer, sizeof(ktx_buffer)); // glFormat
-  ktx_buffer = 0x8E8C; //BC7
-  debug_ktx.write((char*)&ktx_buffer, sizeof(ktx_buffer)); // glInternalFormat
-  ktx_buffer = 0x1907; //GL_RGB
-  debug_ktx.write((char*)&ktx_buffer, sizeof(ktx_buffer)); // glBaseInternalFormat
-  ktx_buffer = size_.x;
-  debug_ktx.write((char*)&ktx_buffer, sizeof(ktx_buffer)); // pixelWidth
-  ktx_buffer = size_.y;
-  debug_ktx.write((char*)&ktx_buffer, sizeof(ktx_buffer)); // pixelHeight
-  ktx_buffer = 0;
-  debug_ktx.write((char*)&ktx_buffer, sizeof(ktx_buffer)); // pixelDepth
-  debug_ktx.write((char*)&ktx_buffer, sizeof(ktx_buffer)); // numberOfArrayElements
-  debug_ktx.write((char*)&ktx_buffer, sizeof(ktx_buffer)); // numberOfFaces
-  ktx_buffer = mip_levels;
-  debug_ktx.write((char*)&ktx_buffer, sizeof(ktx_buffer)); // numberOfMipmapLevels
-  ktx_buffer = 0;
-  debug_ktx.write((char*)&ktx_buffer, sizeof(ktx_buffer)); // bytesOfKeyValueData
-#endif
-
-  compressed_mips_.data_.reset(new uint8_t[byte_size]);
-  compressed_mips_.size_ = byte_size;
-  size = size_;
-  byte_size = 0;
-  unique_ptr<pixel_t[]> resized {new pixel_t[size.x * size.y]};
-
-  while (size.x >= 4 && size.y >= 4) {
-    unsigned mip_byte_size = size.x * size.y;
-    uint8_t *mip_target = compressed_mips_.data_.get() + byte_size;
+  for (uint level = 0; level < levels; level++) {
+    data_item mip_data_item;
+    glm::u16vec2 level_size = {size_.x >> level, size_.y >> level};
+    mip_data_item.size_ = level_size.x * level_size.y;
+    mip_data_item.data_.reset(new uint8_t[mip_data_item.size_]);
 
     int resize_result;
-    if (size != size_) {
-      if (srgb_ && false) {
+    if (level_size != size_) {
+      if (format_ == BC7_SRGB && false) {
         resize_result = stbir_resize_uint8_srgb(reinterpret_cast<uint8_t *>(raw_.get()), size_.x, size_.y, 0,
-                                                reinterpret_cast<uint8_t *>(resized.get()), size.x, size.y, 0, 4, 0, 0);
+                                                reinterpret_cast<uint8_t *>(resized.get()), level_size.x, level_size.y, 0, 4, STBIR_ALPHA_CHANNEL_NONE, 0);
       } else {
         resize_result = stbir_resize_uint8(reinterpret_cast<uint8_t *>(raw_.get()), size_.x, size_.y, 0,
-                                           reinterpret_cast<uint8_t *>(resized.get()), size.x, size.y, 0, 4);
+                                           reinterpret_cast<uint8_t *>(resized.get()), level_size.x, level_size.y, 0, 4);
       }
       if (resize_result == 0)
         throw error("couldn't resize mip level");
     }
     else {
-      memcpy(resized.get(), raw_.get(), sizeof(pixel_t) * size.x * size.y);
+      memcpy(resized.get(), raw_.get(), sizeof(pixel_t) * level_size.x * level_size.y);
     }
 
-#if defined(CUBAGA_DEBUG) && 0
-    stbi_write_png("debug.png", size.x, size.y, 4, resized.get(), 0);
+#if defined(CUBAGA_PACKAGER_DEBUG) && 1
+    stbi_write_png("debug.png", level_size.x, level_size.y, 4, resized.get(), 0);
 #endif
 
-    bc7enc16_compress_block_params bparams;
-    bc7enc16_compress_block_params_init(&bparams);
-    bparams.m_uber_level = BC7ENC16_MAX_UBER_LEVEL;
-    bparams.m_try_least_squares = BC7ENC16_FALSE;
-    bparams.m_mode1_partition_estimation_filterbank = BC7ENC16_FALSE;
-    bc7enc16_compress_block_init();
+    utils::image_u8 source_image(level_size.x, level_size.y);
+    memcpy(source_image.get_pixels().data(), resized.get(), sizeof(pixel_t) * level_size.x * level_size.y);
 
-    glm::uvec2 block_size = size / 4;
-    for (auto block_x = 0; block_x < block_size.x; block_x++) {
-      for (auto block_y = 0; block_y < block_size.y; block_y++) {
-        unsigned block_offset = block_x + block_y * block_size.x;
-        uint8_t *block_target = mip_target + block_offset * 16;
-        pixel_t block_source[16];
-        for (unsigned source_x = 0; source_x < 4; source_x++) {
-          for (unsigned source_y = 0; source_y < 4; source_y++) {
-            unsigned offset_x = block_x * 4 + source_x;
-            unsigned offset_y = block_y * 4 * size.x + source_y * size.x;
-            block_source[source_x + source_y * 4] = resized[offset_x + offset_y];
-          }
-        }
-#if defined(CUBAGA_DEBUG) && 0
-        stbi_write_png("tile.png", 4, 4, 4, block_source, 0);
-#endif
-
-        bc7enc16_compress_block(block_target, &block_source, &bparams);
-      }
+    rdo_bc::rdo_bc_params rp;
+    switch (format_) {
+      case BC7_SRGB: rp.m_dxgi_format = /*DXGI_FORMAT_BC7_UNORM_SRGB*/ DXGI_FORMAT_BC7_UNORM; break;
+      case BC7_UNORM: rp.m_dxgi_format = DXGI_FORMAT_BC7_UNORM; break;
     }
 
-#if defined(CUBAGA_DEBUG) && 0
-    ktx_buffer = mip_byte_size;
-    debug_ktx.write((char*)&ktx_buffer, sizeof(ktx_buffer)); // imageSize
-    debug_ktx.write((char*)mip_target, mip_byte_size);
+    rdo_bc::rdo_bc_encoder encoder;
+    if (!encoder.init(source_image, rp)) {
+      throw std::runtime_error("failed to init BC7 encoder");
+    }
+    if (!encoder.encode()) {
+      throw std::runtime_error("failed to encode mip in BC7");
+    }
+
+    assert(encoder.get_total_blocks_size_in_bytes() == mip_data_item.size_);
+    memcpy(mip_data_item.data_.get(), encoder.get_blocks(), encoder.get_total_blocks_size_in_bytes());
+
+#if defined(CUBAGA_PACKAGER_DEBUG) && 1
+    utils::image_u8 unpacked_image;
+    encoder.unpack_blocks(unpacked_image);
+    stbi_write_png("debug.png", level_size.x, level_size.y, 4, unpacked_image.get_pixels().data(), 0);
 #endif
 
-    byte_size += mip_byte_size;
-    size /= 2;
+    compressed_mips_.emplace_back(std::move(mip_data_item));
   }
 }
 
 size_t texture::layout(size_t _offset) {
-  compressed_mips_.offset_ = _offset;
-  return compressed_mips_.size_;
+  for (auto &mip : compressed_mips_) {
+    mip.offset_ = _offset = align(_offset, 16);
+    _offset += mip.size_;
+  }
+
+  return _offset;
 }
 
 void texture::dump(context &_ctx, std::ostream &_os) {
-  uint8_t powsize_x = (uint8_t)std::log2(size_.x) & 0xF;
-  uint8_t powsize_y = (uint8_t)std::log2(size_.y) & 0xF;
-  uint8_t powsize = (powsize_x << 4) | powsize_y;
-  _os.put(powsize);
-  write_uleb128(_os, compressed_mips_.size_);
-  write_uleb128(_os, compressed_mips_.offset_);
+  _os.put(std::log2(size_.x));
+  _os.put(std::log2(size_.y));
+  _os.put(format_);
+  _os.put(0); // reserved
 
-  memcpy(_ctx.data_.get() + compressed_mips_.offset_, compressed_mips_.data_.get(), compressed_mips_.size_);
+  for (auto &mip : compressed_mips_) {
+    write_u32(_os, mip.offset_);
+    write_u32(_os, mip.size_);
+
+    memcpy(_ctx.data_.get() + mip.offset_, mip.data_.get(), mip.size_);
+  }
 }

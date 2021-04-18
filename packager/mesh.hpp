@@ -23,7 +23,7 @@ struct mesh {
   data_item encoded_vertices_;
   struct lod {
     data_item data_;
-    uint16_t indices_count_;
+    uint32_t indices_count_;
   };
   std::vector<lod> encoded_lods_;
 

@@ -14,35 +14,35 @@ void material::import(context &_ctx, const cgltf_material &_input) {
     throw error("material isn't metallic/roughness");
 
   if (_input.pbr_metallic_roughness.base_color_texture.texture != nullptr)
-    albedo_ = _ctx.import(_input.pbr_metallic_roughness.base_color_texture.texture, true);
+    albedo_ = _ctx.import(_input.pbr_metallic_roughness.base_color_texture.texture, texture::BC7_SRGB);
   else
     albedo_ = 0xff;
 
   if (_input.emissive_texture.texture != nullptr)
-    emissive_ = _ctx.import(_input.emissive_texture.texture, true);
+    emissive_ = _ctx.import(_input.emissive_texture.texture, texture::BC7_SRGB);
   else
     emissive_ = 0xff;
 
   if (_input.normal_texture.texture != nullptr)
-    normals_ = _ctx.import(_input.normal_texture.texture, false);
+    normals_ = _ctx.import(_input.normal_texture.texture, texture::BC7_UNORM);
   else
     normals_ = 0xff;
 
   const bool has_occlusion = _input.occlusion_texture.texture != nullptr;
   const bool has_mr = _input.pbr_metallic_roughness.metallic_roughness_texture.texture != nullptr;
   if (has_occlusion && has_mr) {
-    omr_ = _ctx.import(_input.pbr_metallic_roughness.metallic_roughness_texture.texture, false);
+    omr_ = _ctx.import(_input.pbr_metallic_roughness.metallic_roughness_texture.texture, texture::BC7_UNORM);
     if (_input.occlusion_texture.texture != _input.pbr_metallic_roughness.metallic_roughness_texture.texture) {
-      auto occlusion = texture::import(*_input.occlusion_texture.texture, false);
+      auto occlusion = texture::import(*_input.occlusion_texture.texture, texture::BC7_UNORM);
       _ctx.textures_[omr_].merge(occlusion, {255, 0, 0, 0}, {0, 255, 255, 0});
     }
   }
   else if (has_occlusion) {
-    omr_ = _ctx.import(_input.occlusion_texture.texture, false);
+    omr_ = _ctx.import(_input.occlusion_texture.texture, texture::BC7_UNORM);
     _ctx.textures_[omr_].update({255, 0, 0, 0}, {0, 255, 255, 0});
   }
   else if (has_mr) {
-    omr_ = _ctx.import(_input.pbr_metallic_roughness.metallic_roughness_texture.texture, false);
+    omr_ = _ctx.import(_input.pbr_metallic_roughness.metallic_roughness_texture.texture, texture::BC7_UNORM);
     _ctx.textures_[omr_].update({0, 255, 255, 0}, {255, 0, 0, 0});
   }
   else

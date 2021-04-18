@@ -2,6 +2,7 @@
 
 #include "utils.hpp"
 #include "options.hpp"
+#include "texture.hpp"
 
 struct context {
   options opt_;
@@ -23,7 +24,7 @@ struct context {
   size_t data_size_;
 
   void clear_caches();
-  unsigned import(cgltf_texture *_input, bool _srgb);
+  unsigned import(cgltf_texture *_input, texture::target_format _format);
   unsigned import(cgltf_material *_input);
 
   void process();

@@ -6,8 +6,9 @@
 layout(binding = 0) uniform UniformBufferObject {
     mat4 proj;
     mat4 view;
-    vec3 camera;
-    vec3 light_dir;
+    vec4 camera_pos;
+    vec4 sun_dir;
+    int debug;
 } ubo;
 
 layout(location = 0) in uint in_v_dword0;
@@ -20,12 +21,10 @@ layout(location = 5) in mat4 in_i_transform;
 layout(location = 9) in mat4 in_i_normal;
 
 layout(location = 0) out vec2 out_uv;
-layout(location = 1) out flat vec3 out_pos;
-layout(location = 2) out flat vec3 out_camera;
-layout(location = 3) out flat vec3 out_light_dir;
-layout(location = 4) out flat vec4 out_color_roughness;
-layout(location = 5) out flat vec4 out_emissive_metallic;
-layout(location = 6) out flat mat3 out_TBN;
+layout(location = 1) out vec3 out_pos;
+layout(location = 2) out flat vec4 out_color_roughness;
+layout(location = 3) out flat vec4 out_emissive_metallic;
+layout(location = 4) out flat mat3 out_TBN;
 
 out gl_PerVertex {
     vec4 gl_Position;
@@ -79,6 +78,4 @@ void main() {
 
     out_color_roughness = in_i_color_roughness_r8g8b8a8_unorm;
     out_emissive_metallic = in_i_emissive_metallic_r8g8b8a8_unorm;
-    out_camera = ubo.camera;
-    out_light_dir = ubo.light_dir;
 }
