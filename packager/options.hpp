@@ -5,6 +5,7 @@
 struct options {
   vector<path> inputs_;
   path output_;
+  bool raw_textures_ = false;
 
-  void parse(int _argc, char** _argv);
+  bool parse(int _argc, char** _argv);
 };

@@ -14,7 +14,13 @@ int main(int _argc, char** _argv) {
   context ctx;
 
   options &opt = ctx.opt_;
-  opt.parse(_argc, _argv);
+  if (!opt.parse(_argc, _argv)) {
+    std::cerr << "couldn't parse command line" << std::endl;
+    std::cerr << "usage: " << _argv[0] << " [options] <output> <inputs...>" << std::endl;
+    std::cerr << "options:" << std::endl;
+    std::cerr << "\t--raw_textures: disables BC7 compression" << std::endl;
+    return EXIT_FAILURE;
+  }
 
   for (const path &input : opt.inputs_) {
     cgltf_options options {};

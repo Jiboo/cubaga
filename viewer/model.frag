@@ -31,7 +31,7 @@ layout(location = 0) out vec4 out_color;
 // Encapsulate the various inputs used by the various functions in the shading equation
 // We store values in this struct to simplify the integration of alternative implementations
 // of the shading terms, outlined in the Readme.MD Appendix.
-struct PBRInfo {
+/*struct PBRInfo {
     float NdotL;                  // cos angle between normal and light direction
     float NdotV;                  // cos angle between normal and view direction
     float NdotH;                  // cos angle between normal and half vector
@@ -50,7 +50,7 @@ const float M_PI = 3.141592653589793;
 const float c_MinRoughness = 0.04;
 const float exposure = 4.5;
 const float gamma = 2.2;
-const float prefilteredCubeMipLevels = floor(log2(512));
+const float prefilteredCubeMipLevels = floor(log2(512)) - 1;
 
 #define MANUAL_SRGB 1
 
@@ -79,7 +79,7 @@ vec4 SRGBtoLINEAR(vec4 srgbIn) {
             vec3 bLess = step(vec3(0.04045),srgbIn.xyz);
             vec3 linOut = mix( srgbIn.xyz/vec3(12.92), pow((srgbIn.xyz+vec3(0.055))/vec3(1.055),vec3(2.4)), bLess );
         #endif //SRGB_FAST_APPROXIMATION
-        return vec4(linOut,srgbIn.w);;
+        return vec4(linOut, srgbIn.w);
     #else //MANUAL_SRGB
         return srgbIn;
     #endif //MANUAL_SRGB
@@ -90,10 +90,9 @@ vec4 SRGBtoLINEAR(vec4 srgbIn) {
 // See our README.md on Environment Maps [3] for additional discussion.
 vec3 getIBLContribution(PBRInfo pbrInputs, vec3 n, vec3 reflection) {
     float lod = (pbrInputs.perceptualRoughness * prefilteredCubeMipLevels);
-    // retrieve a scale and bias to F0. See [1], Figure 3
     vec3 brdf = (texture(brdflut_sampler, vec2(pbrInputs.NdotV, 1.0 - pbrInputs.perceptualRoughness))).rgb;
-    vec3 diffuseLight = tonemap(texture(irr_sampler, n)).rgb;
-    vec3 specularLight = tonemap(textureLod(pre_sampler, reflection, lod)).rgb;
+    vec3 diffuseLight = SRGBtoLINEAR(tonemap(texture(irr_sampler, n))).rgb;
+    vec3 specularLight = SRGBtoLINEAR(tonemap(textureLod(pre_sampler, reflection, lod))).rgb;
 
     vec3 diffuse = diffuseLight * pbrInputs.diffuseColor;
     vec3 specular = specularLight * (pbrInputs.specularColor * brdf.x + brdf.y);
@@ -149,42 +148,32 @@ float convertMetallic(vec3 diffuse, vec3 specular, float maxSpecular) {
     float c = c_MinRoughness - perceivedSpecular;
     float D = max(b * b - 4.0 * a * c, 0.0);
     return clamp((-b + sqrt(D)) / (2.0 * a), 0.0, 1.0);
-}
+}*/
 
 void main() {
-    // Roughness is stored in the 'g' channel, metallic is stored in the 'b' channel.
-    // This layout intentionally reserves the 'r' channel for (optional) occlusion map data
     const vec4 ormSample = texture(orm_sampler, in_uv);
-    const float perceptualRoughness = ormSample.g * in_color_roughness.a;
-    const float metallic = ormSample.b * in_emissive_metallic.a;
+    out_color = vec4(1) - vec4(ormSample.ggg, 0);
 
-    // Roughness is authored as perceptual roughness; as is convention,
-    // convert to material roughness by squaring the perceptual roughness [2].
+    /*const float perceptualRoughness = ormSample.g * in_color_roughness.a;
+    const float metallic = ormSample.b * in_emissive_metallic.a;
 
     const vec4 albedoSample = texture(albedo_sampler, in_uv);
     const vec4 baseColor = albedoSample * SRGBtoLINEAR(vec4(in_color_roughness.rgb, 1.0));
-
     const vec3 f0 = vec3(0.04);
     const vec3 diffuseColor = baseColor.rgb * (vec3(1.0) - f0) * (1.0 - metallic);
 
     const float alphaRoughness = perceptualRoughness * perceptualRoughness;
-
     const vec3 specularColor = mix(f0, baseColor.rgb, metallic);
-
-    // Compute reflectance.
     const float reflectance = max(max(specularColor.r, specularColor.g), specularColor.b);
-
-    // For typical incident reflectance range (between 4% to 100%) set the grazing reflectance to 100% for typical fresnel effect.
-    // For very low reflectance range on highly diffuse objects (below 4%), incrementally reduce grazing reflecance to 0%.
     const float reflectance90 = clamp(reflectance * 25.0, 0.0, 1.0);
     const vec3 specularEnvironmentR0 = specularColor.rgb;
     const vec3 specularEnvironmentR90 = vec3(1.0, 1.0, 1.0) * reflectance90;
 
     const vec3 normalsSample = texture(normals_sampler, in_uv).rgb;
     const vec3 n = normalize(in_TBN * (2.0 * normalsSample - 1.0));
-    const vec3 v = normalize(ubo.camera_pos.xyz - in_pos); // Vector from surface point to camera
-    const vec3 l = normalize(ubo.sun_dir.xyz);             // Vector from surface point to light
-    const vec3 h = normalize(l+v);                         // Half vector between both l and v
+    const vec3 v = normalize(ubo.camera_pos.xyz - in_pos);
+    const vec3 l = normalize(ubo.sun_dir.xyz);
+    const vec3 h = normalize(l+v);
     const vec3 reflection = -normalize(reflect(v, n));
 
     const float NdotL = clamp(dot(n, l), 0.001, 1.0);
@@ -208,24 +197,17 @@ void main() {
         specularColor
     );
 
-    // Calculate the shading terms for the microfacet specular shading model
     const vec3 F = specularReflection(pbrInputs);
     const float G = geometricOcclusion(pbrInputs);
     const float D = microfacetDistribution(pbrInputs);
 
     const vec3 u_LightColor = vec3(1.0);
-
-    // Calculation of analytical lighting contribution
     const vec3 diffuseContrib = (1.0 - F) * diffuse(pbrInputs);
     const vec3 specContrib = F * G * D / (4.0 * NdotL * NdotV);
-    // Obtain final intensity as reflectance (BRDF) scaled by the energy of the light (cosine law)
     const vec3 colorLight = NdotL * u_LightColor * (diffuseContrib + specContrib);
-
-    // Calculate lighting contribution from image based lighting source (IBL)
     const vec3 colorIBL = colorLight + getIBLContribution(pbrInputs, n, reflection);
 
     const float u_OcclusionStrength = 1.0f;
-    // Apply optional PBR terms for additional (optional) shading
     const vec3 colorOccluded = mix(colorIBL, colorIBL * ormSample.r, u_OcclusionStrength);
 
     const vec4 emissiveSample = texture(emissive_sampler, in_uv);
@@ -235,31 +217,35 @@ void main() {
     out_color = vec4(colorEmissive, baseColor.a);
 
     switch (ubo.debug) {
-        case 1: out_color.rgb = ormSample.rrr; break;
-        case 2: out_color.rgb = ormSample.ggg; break;
-        case 3: out_color.rgb = ormSample.bbb; break;
+        case 1: out_color = vec4(ormSample.rrr, 1); break;
+        case 2: out_color = vec4(ormSample.ggg, 1); break;
+        case 3: out_color = vec4(ormSample.bbb, 1); break;
 
-        case 4: out_color.rgb = vec3(perceptualRoughness); break;
-        case 5: out_color.rgb = vec3(metallic); break;
+        case 4: out_color = vec4(vec3(perceptualRoughness), 1); break;
+        case 5: out_color = vec4(vec3(metallic), 1); break;
 
         case 6: out_color = albedoSample; break;
         case 7: out_color = baseColor; break;
 
         case 8: out_color = emissiveSample; break;
-        case 9: out_color.rgb = emissive; break;
+        case 9: out_color = vec4(emissive, 1); break;
 
-        case 10: out_color.rgb = colorLight; break;
-        case 11: out_color.rgb = colorIBL; break;
-        case 12: out_color.rgb = colorOccluded; break;
-        case 13: out_color.rgb = colorEmissive; break;
+        case 10: out_color = vec4(colorLight, 1); break;
+        case 11: out_color = vec4(colorIBL, 1); break;
+        case 12: out_color = vec4(colorOccluded, 1); break;
+        case 13: out_color = vec4(colorEmissive, 1); break;
 
-        case 14: out_color.rgb = normalsSample; break;
-        case 15: out_color.rgb = n; break;
+        case 14: out_color = vec4(normalsSample, 1); break;
+        case 15: out_color = vec4(n, 1); break;
 
-        case 16: out_color.rgb = diffuseContrib; break;
-        case 17: out_color.rgb = F; break;
-        case 18: out_color.rgb = vec3(G); break;
-        case 19: out_color.rgb = vec3(D); break;
-        case 20: out_color.rgb = specContrib; break;
-    }
+        case 16: out_color = vec4(diffuseContrib, 1); break;
+        case 17: out_color = vec4(F, 1); break;
+        case 18: out_color = vec4(vec3(G), 1); break;
+        case 19: out_color = vec4(vec3(D), 1); break;
+        case 20: out_color = vec4(specContrib, 1); break;
+
+        case 21: out_color = vec4(texture(brdflut_sampler, vec2(pbrInputs.NdotV, 1.0 - pbrInputs.perceptualRoughness)).rgb, 1); break;
+        case 22: out_color = vec4(vec3(pbrInputs.NdotV), 1); break;
+        case 23: out_color = vec4(vec3(1.0 - pbrInputs.perceptualRoughness), 1); break;
+    }*/
 }

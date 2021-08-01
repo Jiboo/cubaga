@@ -54,53 +54,53 @@ and some models from [KhronosGroup/glTF-Sample-Models](https://github.com/Khrono
 
 Here's the list of functions that the webassembly module may import from the host, and use in reaction of events.
 
-	using actor_ref = u64;
-	using material_ref = u64;
+    using actor_ref = u64;
+    using material_ref = u64;
 
-	// aliases
-	using piece_ref = actor_ref;
-	using player_ref = actor_ref;
+    // aliases
+    using piece_ref = actor_ref;
+    using player_ref = actor_ref;
 
-	enum action {
-		NONE,
-		OK, CANCEL,	EXTRA_0, EXTRA_1,
-		UP, DOWN, LEFT, RIGHT,
-		LOOK_AT,
-	};
+    enum action {
+        NONE,
+        OK, CANCEL,    EXTRA_0, EXTRA_1,
+        UP, DOWN, LEFT, RIGHT,
+        LOOK_AT,
+    };
 
-	void exit(u32 exit_code, char *message, u8 message_size);
+    void exit(u32 exit_code, char *message, u8 message_size);
 
     piece_ref piece_create(u32 mesh_id, u32 material_id);
     void piece_destroy(piece_ref);
     void piece_move(piece_ref, vec3 pos, qat4 rot);
     void piece_visibility(piece_ref, bool visible);
-	void piece_color_factor(material_ref, u8[3] RGB_srgb);
-	void piece_emissive_factor(material_ref, u8[3] RGB_srgb);
-	void piece_roughness_factor(material_ref, float factor);
-	void piece_metallic_factor(material_ref, float factor);
+    void piece_color_factor(material_ref, u8[3] RGB_srgb);
+    void piece_emissive_factor(material_ref, u8[3] RGB_srgb);
+    void piece_roughness_factor(material_ref, float factor);
+    void piece_metallic_factor(material_ref, float factor);
 
     void camera_capture(player_ref, vec3 pos, qat4 rot);
     void camera_free(player_ref);
 
-	void notify(player_ref, char *message_utf8, u8 message_size);
-	void button_help(player_ref, button, char *message_utf8, u8 message_size);
+    void notify(player_ref, char *message_utf8, u8 message_size);
+    void button_help(player_ref, button, char *message_utf8, u8 message_size);
 
 ## Exports
 
 Here's the list of functions that the webassembly module may export to the host, so that it would get notified of
 events (new frame, server error, ...).
 
-	struct player_desc {
-		player_ref id;
-		char *name;
-		u8 name_size;
-		char[5] locale; // "en_US"
-	}
-	struct interaction {
-		player_ref source;
-		actor_ref target;
-		action what;
-	};
+    struct player_desc {
+        player_ref id;
+        char *name;
+        u8 name_size;
+        char[5] locale; // "en_US"
+    }
+    struct interaction {
+        player_ref source;
+        actor_ref target;
+        action what;
+    };
 
     int start(player_desc *players, u8 players_size);
     void tick(float delta_s, interaction *interactions, u32 interactions_size);
@@ -121,59 +121,63 @@ The format is loosely based on GLTF, as the pipeline was intended to take GLTF 2
 
 Vertex data consists of three U32:
 
-	pos_x: 10_unorm,
-	pos_y: 11_unorm,
-	pos_z: 11_unorm,
+    pos_x: 10_unorm,
+    pos_y: 11_unorm,
+    pos_z: 11_unorm,
 
-	nor_x: 8_snorm,
-	nor_y: 8_snorm,
-	nor_z: 8_snorm,
-	tan_sign: 1_unorm,
-	tan_x: 7_snorm,
+    nor_x: 8_snorm,
+    nor_y: 8_snorm,
+    nor_z: 8_snorm,
+    tan_sign: 1_unorm,
+    tan_x: 7_snorm,
 
-	tan_y: 6_snorm,
-	tan_z: 6_snorm,
-	tex_u: 10_unorm,
-	tex_v: 10_unorm,
+    tan_y: 6_snorm,
+    tan_z: 6_snorm,
+    tex_u: 10_unorm,
+    tex_v: 10_unorm,
 
 Here's the file format description:
 
-	u32 magic (must be "cbg1")
-	u32 textures_count (limited to 254)
-	for each texture:
-		u8 xpow (limited to 10, 2^xpow = width at mip level 0)
-		u8 ypow (limited to 10, 2^xpow = width at mip level 0)
-        u8 format (0 => BC7_SRGB (albedo/emissive), 1 => BC7_UNORM (orm/normals))
+    u32 magic (must be "cbg1")
+    u32 textures_count (limited to 254)
+    for each texture:
+        u8 xpow (limited to 10, 2^xpow = width at mip level 0)
+        u8 ypow (limited to 10, 2^xpow = width at mip level 0)
+        u8 format
+            0 => BC7_SRGB (albedo/emissive)
+            1 => BC7_UNORM (orm/normals)
+            2 => R8G8B8A8_SRGB
+            3 => R8G8B8A8_UNORM
         u8 reserved
         for each possible mip_level (no mip under size of 4 pixels in width and/or height)
-          u32 byte_offset
-          u32 byte_size
+            u32 byte_offset
+            u32 byte_size
 
-	u32 materials_count (limited to 255)
-	for each material:
-		u8 albedo_tex_id (index or 0xff if ommited, defaults to white)
-		u8 emissive_tex_id (index or 0xff if ommited, defaults to black)
-		u8 normals_tex_id (index or 0xff if ommited, defaults to "flat")
-		u8 orm_tex_id (R=occlusion G=roughness B=metallic, index or 0xff if ommited, defaults to white)
+    u32 materials_count (limited to 255)
+    for each material:
+        u8 albedo_tex_id (index or 0xff if ommited, defaults to white)
+        u8 emissive_tex_id (index or 0xff if ommited, defaults to black)
+        u8 normals_tex_id (index or 0xff if ommited, defaults to "flat")
+        u8 orm_tex_id (R=occlusion G=roughness B=metallic, index or 0xff if ommited, defaults to white)
 
-		u8[3] color_factor (R8G8B8 sRGB, either scales the albedo tex fetched value, or used as base color if no albedo texture)
-		u8 roughness_factor (either scales the roughness tex fetched value, or used as base roughness if no ORM texture)
-		u8[3] emissive_factor (R8G8B8 sRGB, either scales the emissive tex fetched value, or used as base emissive color if no emissive texture)
-		u8 metallic_factor (either scales the metallic tex fetched value, or used as base metallic if no ORM texture)
+        u8[3] color_factor (R8G8B8 sRGB, either scales the albedo tex fetched value, or used as base color if no albedo texture)
+        u8 roughness_factor (either scales the roughness tex fetched value, or used as base roughness if no ORM texture)
+        u8[3] emissive_factor (R8G8B8 sRGB, either scales the emissive tex fetched value, or used as base emissive color if no emissive texture)
+        u8 metallic_factor (either scales the metallic tex fetched value, or used as base metallic if no ORM texture)
 
-	u32 mesh_count (limited to 255)
-	for each mesh:
-		float[3] translate
-		float[3] scale (all vertices positions are normalized, use these transforms to render them normally)
-		u32 vertices_count (each vertex is 3 u32, max vertices count is 64k)
-		u32 encoded_vertices_byte_offset (vertices are encoded using meshoptimizer compression)
-		u32 encoded_vertices_byte_size
+    u32 mesh_count (limited to 255)
+    for each mesh:
+        float[3] translate
+        float[3] scale (all vertices positions are normalized, use these transforms to render them normally)
+        u32 vertices_count (each vertex is 3 u32, max vertices count is 64k)
+        u32 encoded_vertices_byte_offset (vertices are encoded using meshoptimizer compression)
+        u32 encoded_vertices_byte_size
 
-		u32 lod_levels
-		for each lod_level:
-			u32 indices_count (if lod_level>0, must be at least half of previous lod_level)
-			u32 encoded_indices_byte_offset (indices are encoded using meshoptimizer compression)
-			u32 encoded_indices_byte_size
+        u32 lod_levels
+        for each lod_level:
+            u32 indices_count (if lod_level>0, must be at least half of previous lod_level)
+            u32 encoded_indices_byte_offset (indices are encoded using meshoptimizer compression)
+            u32 encoded_indices_byte_size
 
-	u32 data_size
-	u8[data_size] data
+    u32 data_size
+    u8[data_size] data

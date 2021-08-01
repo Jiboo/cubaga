@@ -24,6 +24,9 @@ void texture::import(context &_ctx, const cgltf_texture &_input, target_format _
 }
 
 texture texture::import(uint8_t *_buffer, size_t _size, target_format _format) {
+  auto finfo = format_info(_format);
+  assert(finfo.valid());
+
   texture result {};
   int xraw, yraw, channels;
   if (stbi_info_from_memory(_buffer, _size, &xraw, &yraw, &channels) == 0)
@@ -32,10 +35,8 @@ texture texture::import(uint8_t *_buffer, size_t _size, target_format _format) {
   if (!std::has_single_bit(unsigned(xraw)) || !std::has_single_bit(unsigned(yraw)))
     throw error("image size not power of 2");
 
-  if ((_format == BC7_SRGB || _format == BC7_UNORM) && channels != 3)
+  if (finfo.components_ < channels)
     throw error("unexpected number of channels");
-  /*if ((_format == BC5_UNORM) && channels != 2)
-    throw error("unexpected number of channels");*/
 
   auto *decodedraw = reinterpret_cast<pixel_t*>(stbi_load_from_memory(_buffer, _size, &xraw, &yraw, &channels, 4));
   if (decodedraw == nullptr)
@@ -60,7 +61,7 @@ texture texture::import(uint8_t *_buffer, size_t _size, target_format _format) {
     result.raw_.reset(new pixel_t[yraw * xraw]);
 
     int resize_result;
-    if (_format == BC7_SRGB && false) {
+    if (finfo.srgb() && false) {
       resize_result = stbir_resize_uint8_srgb(reinterpret_cast<uint8_t *>(decoded.get()), xraw, yraw, 0,
           reinterpret_cast<uint8_t *>(result.raw_.get()), xresized, yresized, 0, 4, 0, 0);
     }
@@ -130,16 +131,19 @@ void texture::process(context &_ctx) {
   const uint min_extent = std::min(size_.x, size_.y);
   const uint levels = floor(std::log2(min_extent)) - 1;
   unique_ptr<pixel_t[]> resized {new pixel_t[size_.x * size_.y]};
+  auto finfo = format_info(format_);
+  assert(finfo.valid());
 
   for (uint level = 0; level < levels; level++) {
     data_item mip_data_item;
     glm::u16vec2 level_size = {size_.x >> level, size_.y >> level};
-    mip_data_item.size_ = level_size.x * level_size.y;
+    mip_data_item.size_ = (level_size.x * level_size.y * finfo.bpp()) / 8;
     mip_data_item.data_.reset(new uint8_t[mip_data_item.size_]);
+    const uint raw_byte_size = sizeof(pixel_t) * level_size.x * level_size.y;
 
     int resize_result;
     if (level_size != size_) {
-      if (format_ == BC7_SRGB && false) {
+      if (finfo.srgb() && false) {
         resize_result = stbir_resize_uint8_srgb(reinterpret_cast<uint8_t *>(raw_.get()), size_.x, size_.y, 0,
                                                 reinterpret_cast<uint8_t *>(resized.get()), level_size.x, level_size.y, 0, 4, STBIR_ALPHA_CHANNEL_NONE, 0);
       } else {
@@ -150,39 +154,44 @@ void texture::process(context &_ctx) {
         throw error("couldn't resize mip level");
     }
     else {
-      memcpy(resized.get(), raw_.get(), sizeof(pixel_t) * level_size.x * level_size.y);
+      memcpy(resized.get(), raw_.get(), raw_byte_size);
     }
 
 #if defined(CUBAGA_PACKAGER_DEBUG) && 1
     stbi_write_png("debug.png", level_size.x, level_size.y, 4, resized.get(), 0);
 #endif
 
-    utils::image_u8 source_image(level_size.x, level_size.y);
-    memcpy(source_image.get_pixels().data(), resized.get(), sizeof(pixel_t) * level_size.x * level_size.y);
-
-    rdo_bc::rdo_bc_params rp;
-    switch (format_) {
-      case BC7_SRGB: rp.m_dxgi_format = /*DXGI_FORMAT_BC7_UNORM_SRGB*/ DXGI_FORMAT_BC7_UNORM; break;
-      case BC7_UNORM: rp.m_dxgi_format = DXGI_FORMAT_BC7_UNORM; break;
+    if (_ctx.opt_.raw_textures_) {
+      memcpy(mip_data_item.data_.get(), resized.get(), raw_byte_size);
     }
+    else {
+      utils::image_u8 source_image(level_size.x, level_size.y);
+      memcpy(source_image.get_pixels().data(), resized.get(), raw_byte_size);
 
-    rdo_bc::rdo_bc_encoder encoder;
-    if (!encoder.init(source_image, rp)) {
-      throw std::runtime_error("failed to init BC7 encoder");
-    }
-    if (!encoder.encode()) {
-      throw std::runtime_error("failed to encode mip in BC7");
-    }
+      rdo_bc::rdo_bc_params rp;
+      switch (format_) {
+        case BC7_SRGB: rp.m_dxgi_format = /*DXGI_FORMAT_BC7_UNORM_SRGB*/ DXGI_FORMAT_BC7_UNORM; break;
+        case BC7_UNORM: rp.m_dxgi_format = DXGI_FORMAT_BC7_UNORM; break;
+        default: throw std::runtime_error("unexpected format for BC7 compression");
+      }
 
-    assert(encoder.get_total_blocks_size_in_bytes() == mip_data_item.size_);
-    memcpy(mip_data_item.data_.get(), encoder.get_blocks(), encoder.get_total_blocks_size_in_bytes());
+      rdo_bc::rdo_bc_encoder encoder;
+      if (!encoder.init(source_image, rp)) {
+        throw std::runtime_error("failed to init BC7 encoder");
+      }
+      if (!encoder.encode()) {
+        throw std::runtime_error("failed to encode mip in BC7");
+      }
+
+      assert(encoder.get_total_blocks_size_in_bytes() == mip_data_item.size_);
+      memcpy(mip_data_item.data_.get(), encoder.get_blocks(), encoder.get_total_blocks_size_in_bytes());
 
 #if defined(CUBAGA_PACKAGER_DEBUG) && 1
-    utils::image_u8 unpacked_image;
-    encoder.unpack_blocks(unpacked_image);
-    stbi_write_png("debug.png", level_size.x, level_size.y, 4, unpacked_image.get_pixels().data(), 0);
+      utils::image_u8 unpacked_image;
+      encoder.unpack_blocks(unpacked_image);
+      stbi_write_png("debug.png", level_size.x, level_size.y, 4, unpacked_image.get_pixels().data(), 0);
 #endif
-
+    }
     compressed_mips_.emplace_back(std::move(mip_data_item));
   }
 }

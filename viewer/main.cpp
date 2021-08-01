@@ -110,6 +110,8 @@ struct texture {
   enum target_format {
     BC7_SRGB = 0,
     BC7_UNORM = 1,
+    R8G8B8A8_SRGB = 2,
+    R8G8B8A8_UNORM = 3,
   };
 
   u16vec2 extents_;
@@ -124,6 +126,8 @@ struct texture {
     switch (input_format) {
       case BC7_SRGB: format_ = VK_FORMAT_BC7_SRGB_BLOCK; break;
       case BC7_UNORM: format_ = VK_FORMAT_BC7_UNORM_BLOCK; break;
+      case R8G8B8A8_SRGB: format_ = VK_FORMAT_R8G8B8A8_SRGB; break;
+      case R8G8B8A8_UNORM: format_ = VK_FORMAT_R8G8B8A8_UNORM; break;
       default: assert(false);
     }
 
@@ -233,9 +237,16 @@ vec4 make_light_dir(vec2 _rot_deg = {75, 40}) {
 }
 
 int main(int _argc, char **_argv) {
+  using clock = std::chrono::high_resolution_clock;
+  auto profile_log = [start = clock::now()](const char *_message) {
+    std::cout << "[cubaga] " << (clock::now() - start) << "\t" << _message << std::endl;
+  };
+
   IMGUI_CHECKVERSION();
   ImGui::SetCurrentContext(ImGui::CreateContext());
   ImGui::StyleColorsDark();
+
+  profile_log("imgui initialized");
 
   if (_argc != 2) {
     cerr << "usage: <crb file>" << endl;
@@ -253,8 +264,11 @@ int main(int _argc, char **_argv) {
   fcrb.close();
   cubaga crb;
   uint8_t *crb_data = crb.parse(fcrb_data.get());
+  profile_log("cbr parsed");
 
   display d("cubaga-viewer");
+
+  profile_log("hut::display created");
 
   window_params wparams;
   wparams.flags_ |= window_params::FMULTISAMPLING;
@@ -263,8 +277,12 @@ int main(int _argc, char **_argv) {
   w.clear_color({1, 1, 1, 1});
   w.title(sstream("cubaga-viewer ") << _argv[1] << " " << _argv[2] << " " << _argv[3]);
 
+  profile_log("hut::window created");
+
   if (!ImGui_ImplHut_Init(&d, &w, true))
     return EXIT_FAILURE;
+
+  profile_log("hut::imgui initialized");
 
   auto b = d.alloc_buffer(256*1024*1024);
 
@@ -272,6 +290,8 @@ int main(int _argc, char **_argv) {
   axis_params.topology_ = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
   axis_params.depthCompare_ = VK_COMPARE_OP_ALWAYS;
   auto axis_pipeline = make_unique<axis_d>(w, axis_params);
+  profile_log("axis_pipeline initialized");
+
   auto axis_indices = b->allocate<uint16_t>(6);
   axis_indices->set({0, 1, 2, 3, 4, 5});
   auto axis_instance = b->allocate<axis_d::instance>(1);
@@ -289,6 +309,8 @@ int main(int _argc, char **_argv) {
   });
 
   auto skybox_pipeline = make_unique<skybox_d>(w);
+  profile_log("skybox_pipeline initialized");
+
   auto skybox_instance = b->allocate<skybox_d::instance>(1);
   skybox_instance->set(skybox_d::instance{make_mat({0, 0, 0}, {1000, 1000, 1000})});
   auto skybox_indices = b->allocate<uint16_t>(36);
@@ -313,6 +335,7 @@ int main(int _argc, char **_argv) {
   });
 
   auto model_pipeline = make_unique<model_d>(w);
+  profile_log("model_pipeline initialized");
 
   struct mesh_bufset {
     vector<model_d::shared_indices> indices_;
@@ -346,21 +369,23 @@ int main(int _argc, char **_argv) {
     bufset.vertices_ = vertices;
   }
 
-  auto import_tex = [&d, &crb, &crb_data](uint8_t _index, VkFormat _format) {
-    auto &tex = crb.textures_[_index];
+  profile_log("mesh staged");
 
-    assert(_format == tex.format_);
+  auto import_tex = [&d, &crb, &crb_data](uint8_t _index) {
+    auto &tex = crb.textures_[_index];
 
     image_params params;
     params.size_ = tex.extents_;
-    params.format_ = _format;
+    params.format_ = tex.format_;
     params.tiling_ = VK_IMAGE_TILING_OPTIMAL;
     params.levels_ = tex.mips_.size();
 
     auto result = std::make_shared<image>(d, params);
     for (u16 level = 0; level < tex.mips_.size(); level++) {
       auto data = span<const u8>{crb_data + tex.mips_[level].offset_, tex.mips_[level].size_};
-      result->update({u16vec4{0, 0, tex.extents_ >> level}, level}, data, tex.extents_.x >> level);
+      auto row_pixel_count = tex.extents_.x >> level;
+      auto row_stride = (row_pixel_count * info(tex.format_).bpp()) / 8;
+      result->update({u16vec4{0, 0, tex.extents_ >> level}, level}, data, row_stride);
     }
     return result;
   };
@@ -371,17 +396,11 @@ int main(int _argc, char **_argv) {
     params.format_ = VK_FORMAT_R8G8B8A8_UNORM;
     return image::load_raw(d, data, 4, params);
   };
-  auto default_tex_rg = [&d] (u8vec2 _color) {
-    auto data = span<uint8_t>{&_color.x, 2};
-    image_params params;
-    params.size_ = {1, 1};
-    params.format_ = VK_FORMAT_R8G8_UNORM;
-    return image::load_raw(d, data, 2, params);
-  };
 
   shared_image deftex_white = default_tex_rgba({255, 255, 255, 255});
   shared_image deftex_black = default_tex_rgba({0, 0, 0, 255});
-  shared_image deftex_normals = default_tex_rg({0, 0});
+  shared_image deftex_red = default_tex_rgba({255, 0, 0, 255});
+  shared_image deftex_normals = default_tex_rgba({128, 128, 255, 255});
 
   struct material_texset {
     shared_image albedo_, emissive_, normals_, orm_;
@@ -392,15 +411,17 @@ int main(int _argc, char **_argv) {
   for (uint material_id = 0; material_id < material_count; material_id++) {
     const auto &mat = crb.materials_[material_id];
     material_texsets.emplace_back(material_texset{
-        mat.albedo_ != 0xff ? import_tex(mat.albedo_, VK_FORMAT_BC7_SRGB_BLOCK) : deftex_white,
-        mat.emissive_ != 0xff ? import_tex(mat.emissive_, VK_FORMAT_BC7_SRGB_BLOCK) : deftex_black,
-        mat.normals_ != 0xff ? import_tex(mat.normals_, VK_FORMAT_BC7_UNORM_BLOCK) : deftex_normals,
-        mat.orm_ != 0xff ? import_tex(mat.orm_, VK_FORMAT_BC7_UNORM_BLOCK) : deftex_black});
+        mat.albedo_ != 0xff ? import_tex(mat.albedo_) : deftex_white,
+        mat.emissive_ != 0xff ? import_tex(mat.emissive_) : deftex_black,
+        mat.normals_ != 0xff ? import_tex(mat.normals_) : deftex_normals,
+        mat.orm_ != 0xff ? import_tex(mat.orm_) : deftex_black});
   }
+
+  profile_log("textures staged");
 
   hut::ktx::load_params ktx_params;
   ktx_params.tiling_ = VK_IMAGE_TILING_OPTIMAL;
-  shared_image brdflut = hut::ktx::load(d, cubaga_pbr_data::brdflut_ktx2, ktx_params).value_or(deftex_white);
+  shared_image brdflut = hut::ktx::load(d, cubaga_pbr_data::brdflut_ktx2, ktx_params).value_or(deftex_red);
   struct envmap_texset {
     shared_image irr_, pre_;
   };
@@ -423,6 +444,8 @@ int main(int _argc, char **_argv) {
       },
   };
   int current_envmap_selection = 0;
+
+  profile_log("envmap staged");
 
   const auto &default_mesh = crb.meshes_[current_mesh_selection];
   const auto &default_mat = crb.materials_[current_material_selection];
@@ -475,6 +498,8 @@ int main(int _argc, char **_argv) {
     }
   }
 
+  profile_log("hut/render prepared");
+
   w.on_draw.connect([&](VkCommandBuffer _buffer) {
     uint descriptor_index = current_material_selection * materials_count + current_envmap_selection;
     auto &bufset = mesh_bufsets[current_mesh_selection];
@@ -499,7 +524,7 @@ int main(int _argc, char **_argv) {
           "Emissive map", "Emissive",
           "Color light", "Color ibl", "Color occluded", "Color emissive",
           "Normals map", "Normals",
-          "diffuseContrib", "F", "G", "D", "specContrib",
+          "diffuseContrib", "F", "G", "D", "specContrib", "BRDF", "BRDFx", "BRDFy", "BRDFy 2linear"
       };
       if (ImGui::Combo("Debug", &current_debug_selection, debug_items.data(), debug_items.size())) {
         ubo->update_subone(0, offsetof(model_ubo, debug_), sizeof(int), &current_debug_selection);
@@ -534,6 +559,12 @@ int main(int _argc, char **_argv) {
 
     ImGui::Render();
     ImGui_ImplHut_RenderDrawData(_buffer, ImGui::GetDrawData());
+
+    static bool already_announced = false;
+    if (!already_announced) {
+      profile_log("first command list recorded");
+      already_announced = true;
+    }
 
     return false;
   });

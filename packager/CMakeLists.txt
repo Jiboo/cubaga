@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 
 file(GLOB CUBAGA_PACKAGER_SRC *.cpp)
 add_executable(cubaga-packager ${CUBAGA_PACKAGER_SRC} deps.c)
-target_link_libraries(cubaga-packager meshoptimizer mikktspace bc7enc_rdo)
+target_link_libraries(cubaga-packager meshoptimizer mikktspace bc7enc_rdo hut)
 target_include_directories(cubaga-packager PUBLIC
     ../deps/cgltf
     ../deps/stb ${GLM_INCLUDE_DIRS})
