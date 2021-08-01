@@ -1,4 +1,5 @@
 #include <filesystem>
+#include <iostream>
 
 #include "rdo_bc_encoder.h"
 
@@ -441,8 +442,8 @@ void gen_brdflut(const path &_output_file, display &_display, u16 _size) {
     ofs.download(pixels.get(), byte_stride);
 
 #if defined(CUBAGA_PBRGEN_DEBUG)
-    string output = path(_output_file).replace_extension((sstream(".debug.level") << level << ".png").str());
-    stbi_write_png(output.c_str(), level_size, level_size, info(result.format_).bpp() / 8, pixels.get(), byte_stride);
+    auto output = path(_output_file).replace_extension((sstream(".debug.level") << level << ".png").str()).u8string();
+    stbi_write_png((char*)output.c_str(), level_size, level_size, info(result.format_).bpp() / 8, pixels.get(), byte_stride);
 #endif
 
     result.levels_.emplace_back(std::move(lod));
@@ -549,8 +550,8 @@ void gen_irradiance(const path &_output_file, display &_display, const shared_im
       ofs.download(pixels.get(), byte_stride);
 
 #if defined(CUBAGA_PBRGEN_DEBUG)
-      string output = path(_output_file).replace_extension((sstream(".debug.level") << level << ".layer" << layer << ".png").str());
-      stbi_write_png(output.c_str(), level_size, level_size, info(result.format_).bpp() / 8, pixels.get(), byte_stride);
+      auto output = path(_output_file).replace_extension((sstream(".debug.level") << level << ".layer" << layer << ".png").str()).u8string();
+      stbi_write_png((char*)output.c_str(), level_size, level_size, info(result.format_).bpp() / 8, pixels.get(), byte_stride);
 #endif
       std::cout << "\t\t\tgenerated " << _output_file << " level " << level << " layer " << layer << " in " << (high_resolution_clock::now() - start_layer) << std::endl;
     }
@@ -659,8 +660,8 @@ void gen_prefiltered(const path &_output_file, display &_display, const shared_i
       ofs.download(pixels.get(), byte_stride);
 
 #if defined(CUBAGA_PBRGEN_DEBUG)
-      string output = path(_output_file).replace_extension((sstream(".debug.level") << level << ".layer" << layer << ".png").str());
-      stbi_write_png(output.c_str(), level_size, level_size, info(result.format_).bpp() / 8, pixels.get(), byte_stride);
+      auto output = path(_output_file).replace_extension((sstream(".debug.level") << level << ".layer" << layer << ".png").str()).u8string();
+      stbi_write_png((char*)output.c_str(), level_size, level_size, info(result.format_).bpp() / 8, pixels.get(), byte_stride);
 #endif
       std::cout << "\t\t\tgenerated " << _output_file << " level " << level << " layer " << layer << " in " << (high_resolution_clock::now() - start_layer) << std::endl;
     }

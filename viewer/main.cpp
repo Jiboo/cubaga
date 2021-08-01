@@ -482,7 +482,7 @@ int main(int _argc, char **_argv) {
   axis_pipeline->write(0, ubo);
   bool draw_axis = true;
 
-  size_t materials_count = std::max(1UL, material_texsets.size());
+  size_t materials_count = std::max(1ULL, material_texsets.size());
   size_t total_set_number = envmaps_texsets.size() * materials_count;
   model_pipeline->alloc_next_descriptors(total_set_number - 1);
   skybox_pipeline->alloc_next_descriptors(total_set_number - 1);

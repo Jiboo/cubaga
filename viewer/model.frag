@@ -31,7 +31,7 @@ layout(location = 0) out vec4 out_color;
 // Encapsulate the various inputs used by the various functions in the shading equation
 // We store values in this struct to simplify the integration of alternative implementations
 // of the shading terms, outlined in the Readme.MD Appendix.
-/*struct PBRInfo {
+struct PBRInfo {
     float NdotL;                  // cos angle between normal and light direction
     float NdotV;                  // cos angle between normal and view direction
     float NdotH;                  // cos angle between normal and half vector
@@ -148,13 +148,13 @@ float convertMetallic(vec3 diffuse, vec3 specular, float maxSpecular) {
     float c = c_MinRoughness - perceivedSpecular;
     float D = max(b * b - 4.0 * a * c, 0.0);
     return clamp((-b + sqrt(D)) / (2.0 * a), 0.0, 1.0);
-}*/
+}
 
 void main() {
     const vec4 ormSample = texture(orm_sampler, in_uv);
-    out_color = vec4(1) - vec4(ormSample.ggg, 0);
+    //out_color = vec4(1) - vec4(ormSample.ggg, 0);
 
-    /*const float perceptualRoughness = ormSample.g * in_color_roughness.a;
+    const float perceptualRoughness = ormSample.g * in_color_roughness.a;
     const float metallic = ormSample.b * in_emissive_metallic.a;
 
     const vec4 albedoSample = texture(albedo_sampler, in_uv);
@@ -247,5 +247,5 @@ void main() {
         case 21: out_color = vec4(texture(brdflut_sampler, vec2(pbrInputs.NdotV, 1.0 - pbrInputs.perceptualRoughness)).rgb, 1); break;
         case 22: out_color = vec4(vec3(pbrInputs.NdotV), 1); break;
         case 23: out_color = vec4(vec3(1.0 - pbrInputs.perceptualRoughness), 1); break;
-    }*/
+    }
 }

@@ -1,18 +1,18 @@
 [submodule "deps/meshoptimizer"]
 	path = deps/meshoptimizer
-	url = https://github.com/zeux/meshoptimizer.git
+	url = git@github.com:zeux/meshoptimizer.git
 [submodule "deps/libhut"]
 	path = deps/libhut
-	url = https://github.com/Jiboo/libhut.git
+	url = git@github.com:Jiboo/libhut.git
 [submodule "deps/stb"]
 	path = deps/stb
-	url = https://github.com/nothings/stb.git
+	url = git@github.com:nothings/stb.git
 [submodule "deps/cgltf"]
 	path = deps/cgltf
-	url = https://github.com/jkuhlmann/cgltf.git
+	url = git@github.com:jkuhlmann/cgltf.git
 [submodule "deps/ext-mikktspace"]
 	path = deps/ext-mikktspace
-	url = https://github.com/tcoppex/ext-mikktspace
+	url = git@github.com:tcoppex/ext-mikktspace.git
 [submodule "deps/bc7enc_rdo"]
 	path = deps/bc7enc_rdo
-	url = https://github.com/richgel999/bc7enc_rdo
+	url = git@github.com:richgel999/bc7enc_rdo.git

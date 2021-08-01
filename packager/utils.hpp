@@ -32,6 +32,7 @@ using path = std::filesystem::path;
 using error = std::runtime_error;
 
 using pixel_t = glm::u8vec4;
+using uint = unsigned;
 
 struct options;
 struct context;
