@@ -61,8 +61,14 @@ using axis_d = pipeline<uint16_t, viewer_shaders::axis_vert_spv_refl, hut_shader
 using skybox_d = pipeline<uint16_t, viewer_shaders::skybox_vert_spv_refl, viewer_shaders::skybox_frag_spv_refl, const shared_ubo&, const shared_image&, const shared_sampler&>;
 using model_d = pipeline<uint16_t, viewer_shaders::model_vert_spv_refl, viewer_shaders::model_frag_spv_refl,
             const shared_ubo&,
-            const shared_image&, const shared_image&, const shared_image&, const shared_image&, const shared_sampler&, // albedo emissive normals ORM
-            const shared_image&, const shared_image&, const shared_image&, const shared_sampler&>; // irradiance prefiltered brdflut
+            const shared_image&, const shared_sampler&, // albedo
+            const shared_image&, const shared_sampler&, // emissive
+            const shared_image&, const shared_sampler&, // normals
+            const shared_image&, const shared_sampler&, // ORM
+            const shared_image&, const shared_sampler&, // irradiance
+            const shared_image&, const shared_sampler&, // prefiltered
+            const shared_image&, const shared_sampler& // brdflut
+            >;
 
 mat4 make_mat(vec3 _translate, vec3 _scale) {
   mat4 m(1);
@@ -477,12 +483,16 @@ int main(int _argc, char **_argv) {
   };
   shared_ubo ubo = d.alloc_ubo(b, default_ubo);
 
+  auto maxLod = [](unsigned _px) -> unsigned { return std::floor(std::log2(_px)) - 2; };
   shared_sampler samp = make_shared<sampler>(d);
+  shared_sampler samp_model = make_shared<sampler>(d, true, maxLod(1024));
+  shared_sampler samp_pre = make_shared<sampler>(d, true, maxLod(512));
+  shared_sampler samp_irr = make_shared<sampler>(d, true, maxLod(64));
 
   axis_pipeline->write(0, ubo);
   bool draw_axis = true;
 
-  size_t materials_count = std::max(1ULL, material_texsets.size());
+  size_t materials_count = std::max(size_t(1), material_texsets.size());
   size_t total_set_number = envmaps_texsets.size() * materials_count;
   model_pipeline->alloc_next_descriptors(total_set_number - 1);
   skybox_pipeline->alloc_next_descriptors(total_set_number - 1);
@@ -492,8 +502,9 @@ int main(int _argc, char **_argv) {
       const auto &mat_texset = material_texsets[material];
       const auto &env_texset = envmaps_texsets[envmap];
       model_pipeline->write(descriptor_index, ubo,
-                            mat_texset.albedo_, mat_texset.emissive_, mat_texset.normals_, mat_texset.orm_, samp,
-                            env_texset.irr_, env_texset.pre_, brdflut, samp);
+                            mat_texset.albedo_, samp_model, mat_texset.emissive_, samp_model,
+                            mat_texset.normals_, samp_model, mat_texset.orm_, samp_model,
+                            env_texset.irr_, samp_irr, env_texset.pre_, samp_pre, brdflut, samp_pre);
       skybox_pipeline->write(descriptor_index, ubo, env_texset.pre_, samp);
     }
   }
@@ -517,14 +528,14 @@ int main(int _argc, char **_argv) {
         ubo->update_subone(0, offsetof(model_ubo, sun_dir_), sizeof(vec3), &light_dir);
       }
       const std::vector<const char*> debug_items = {
-          "None",
-          "Occlusion map", "Roughness map", "Metallic map",
-          "Roughness", "Metallic",
-          "Albedo map", "Base color",
-          "Emissive map", "Emissive",
-          "Color light", "Color ibl", "Color occluded", "Color emissive",
-          "Normals map", "Normals",
-          "diffuseContrib", "F", "G", "D", "specContrib", "BRDF", "BRDFx", "BRDFy", "BRDFy 2linear"
+          /*00*/ "None",
+          /*01*/ "Occlusion map", "Roughness map", "Metallic map",
+          /*04*/ "Roughness", "Metallic",
+          /*06*/ "Albedo map", "Base color",
+          /*08*/ "Emissive map", "Emissive",
+          /*10*/ "Color light", "Color ibl", "Color occluded", "Color emissive",
+          /*14*/ "Normals map", "Normals",
+          /*16*/ "diffuseContrib", "F", "G", "D", "specContrib"
       };
       if (ImGui::Combo("Debug", &current_debug_selection, debug_items.data(), debug_items.size())) {
         ubo->update_subone(0, offsetof(model_ubo, debug_), sizeof(int), &current_debug_selection);

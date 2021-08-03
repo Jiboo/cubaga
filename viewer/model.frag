@@ -50,7 +50,7 @@ const float M_PI = 3.141592653589793;
 const float c_MinRoughness = 0.04;
 const float exposure = 4.5;
 const float gamma = 2.2;
-const float prefilteredCubeMipLevels = floor(log2(512)) - 1;
+const float prefilteredCubeMipLevels = floor(log2(512)) - 2;
 
 #define MANUAL_SRGB 1
 
@@ -243,9 +243,5 @@ void main() {
         case 18: out_color = vec4(vec3(G), 1); break;
         case 19: out_color = vec4(vec3(D), 1); break;
         case 20: out_color = vec4(specContrib, 1); break;
-
-        case 21: out_color = vec4(texture(brdflut_sampler, vec2(pbrInputs.NdotV, 1.0 - pbrInputs.perceptualRoughness)).rgb, 1); break;
-        case 22: out_color = vec4(vec3(pbrInputs.NdotV), 1); break;
-        case 23: out_color = vec4(vec3(1.0 - pbrInputs.perceptualRoughness), 1); break;
     }
 }

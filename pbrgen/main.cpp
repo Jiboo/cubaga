@@ -49,7 +49,7 @@ shared_image load_envmap(display &_d, const path &_in) {
 
 constexpr size_t dfd_header_size = 1 + KHR_DF_WORD_SAMPLESTART;
 
-// DFD generation taken from https://github.com/KhronosGroup/KTX-Specification
+// DFD generation taken from https://github.com/KhronosGroup/KTX-Software/tree/master/lib/dfdutils
 void dfd_write_header(u32 *_dst, u32 _samples, u32 _bytes, format_suffix _suffix) {
   _dst[0] = sizeof(uint32_t) * (dfd_header_size + _samples * KHR_DF_WORD_SAMPLEWORDS);
 
@@ -167,6 +167,265 @@ size_t dfd_write_unpacked(u32 *_dst, int _channels, int _bytes, format_suffix _s
   return dfd_header_size + _channels * KHR_DF_WORD_SAMPLEWORDS;
 }
 
+static khr_df_model_e compModelMapping[] = {
+  KHR_DF_MODEL_BC1A,   /*!< BC1, aka DXT1, no alpha. */
+  KHR_DF_MODEL_BC1A,   /*!< BC1, aka DXT1, punch-through alpha. */
+  KHR_DF_MODEL_BC2,    /*!< BC2, aka DXT2 and DXT3. */
+  KHR_DF_MODEL_BC3,    /*!< BC3, aka DXT4 and DXT5. */
+  KHR_DF_MODEL_BC4,    /*!< BC4. */
+  KHR_DF_MODEL_BC5,    /*!< BC5. */
+  KHR_DF_MODEL_BC6H,   /*!< BC6h HDR format. */
+  KHR_DF_MODEL_BC7,    /*!< BC7. */
+  KHR_DF_MODEL_ETC2,   /*!< ETC2 no alpha. */
+  KHR_DF_MODEL_ETC2,   /*!< ETC2 punch-through alpha. */
+  KHR_DF_MODEL_ETC2,   /*!< ETC2 independent alpha. */
+  KHR_DF_MODEL_ETC2,   /*!< R11 ETC2 single-channel. */
+  KHR_DF_MODEL_ETC2,   /*!< R11G11 ETC2 dual-channel. */
+  KHR_DF_MODEL_ASTC,   /*!< ASTC. */
+  KHR_DF_MODEL_ETC1S,  /*!< ETC1S. */
+  KHR_DF_MODEL_PVRTC,  /*!< PVRTC(1). */
+  KHR_DF_MODEL_PVRTC2  /*!< PVRTC2. */
+};
+
+static uint32_t compSampleCount[] = {
+  1U, /*!< BC1, aka DXT1, no alpha. */
+  1U, /*!< BC1, aka DXT1, punch-through alpha. */
+  2U, /*!< BC2, aka DXT2 and DXT3. */
+  2U, /*!< BC3, aka DXT4 and DXT5. */
+  1U, /*!< BC4. */
+  2U, /*!< BC5. */
+  1U, /*!< BC6h HDR format. */
+  1U, /*!< BC7. */
+  1U, /*!< ETC2 no alpha. */
+  2U, /*!< ETC2 punch-through alpha. */
+  2U, /*!< ETC2 independent alpha. */
+  1U, /*!< R11 ETC2 single-channel. */
+  2U, /*!< R11G11 ETC2 dual-channel. */
+  1U, /*!< ASTC. */
+  1U, /*!< ETC1S. */
+  1U, /*!< PVRTC. */
+  1U  /*!< PVRTC2. */
+};
+
+static khr_df_model_channels_e compFirstChannel[] = {
+  KHR_DF_CHANNEL_BC1A_COLOR,        /*!< BC1, aka DXT1, no alpha. */
+  KHR_DF_CHANNEL_BC1A_ALPHAPRESENT, /*!< BC1, aka DXT1, punch-through alpha. */
+  KHR_DF_CHANNEL_BC2_ALPHA,         /*!< BC2, aka DXT2 and DXT3. */
+  KHR_DF_CHANNEL_BC3_ALPHA,         /*!< BC3, aka DXT4 and DXT5. */
+  KHR_DF_CHANNEL_BC4_DATA,          /*!< BC4. */
+  KHR_DF_CHANNEL_BC5_RED,           /*!< BC5. */
+  KHR_DF_CHANNEL_BC6H_COLOR,        /*!< BC6h HDR format. */
+  KHR_DF_CHANNEL_BC7_COLOR,         /*!< BC7. */
+  KHR_DF_CHANNEL_ETC2_COLOR,        /*!< ETC2 no alpha. */
+  KHR_DF_CHANNEL_ETC2_COLOR,        /*!< ETC2 punch-through alpha. */
+  KHR_DF_CHANNEL_ETC2_ALPHA,        /*!< ETC2 independent alpha. */
+  KHR_DF_CHANNEL_ETC2_RED,          /*!< R11 ETC2 single-channel. */
+  KHR_DF_CHANNEL_ETC2_RED,          /*!< R11G11 ETC2 dual-channel. */
+  KHR_DF_CHANNEL_ASTC_DATA,         /*!< ASTC. */
+  KHR_DF_CHANNEL_ETC1S_RGB,         /*!< ETC1S. */
+  KHR_DF_CHANNEL_PVRTC_COLOR,       /*!< PVRTC. */
+  KHR_DF_CHANNEL_PVRTC2_COLOR       /*!< PVRTC2. */
+};
+
+static khr_df_model_channels_e compSecondChannel[] = {
+  KHR_DF_CHANNEL_BC1A_COLOR,        /*!< BC1, aka DXT1, no alpha. */
+  KHR_DF_CHANNEL_BC1A_ALPHAPRESENT, /*!< BC1, aka DXT1, punch-through alpha. */
+  KHR_DF_CHANNEL_BC2_COLOR,         /*!< BC2, aka DXT2 and DXT3. */
+  KHR_DF_CHANNEL_BC3_COLOR,         /*!< BC3, aka DXT4 and DXT5. */
+  KHR_DF_CHANNEL_BC4_DATA,          /*!< BC4. */
+  KHR_DF_CHANNEL_BC5_GREEN,         /*!< BC5. */
+  KHR_DF_CHANNEL_BC6H_COLOR,        /*!< BC6h HDR format. */
+  KHR_DF_CHANNEL_BC7_COLOR,         /*!< BC7. */
+  KHR_DF_CHANNEL_ETC2_COLOR,        /*!< ETC2 no alpha. */
+  KHR_DF_CHANNEL_ETC2_ALPHA,        /*!< ETC2 punch-through alpha. */
+  KHR_DF_CHANNEL_ETC2_COLOR,        /*!< ETC2 independent alpha. */
+  KHR_DF_CHANNEL_ETC2_RED,          /*!< R11 ETC2 single-channel. */
+  KHR_DF_CHANNEL_ETC2_GREEN,        /*!< R11G11 ETC2 dual-channel. */
+  KHR_DF_CHANNEL_ASTC_DATA,         /*!< ASTC. */
+  KHR_DF_CHANNEL_ETC1S_RGB,         /*!< ETC1S. */
+  KHR_DF_CHANNEL_PVRTC_COLOR,       /*!< PVRTC. */
+  KHR_DF_CHANNEL_PVRTC2_COLOR       /*!< PVRTC2. */
+};
+
+static uint32_t compSecondChannelOffset[] = {
+  0U,  /*!< BC1, aka DXT1, no alpha. */
+  0U,  /*!< BC1, aka DXT1, punch-through alpha. */
+  64U, /*!< BC2, aka DXT2 and DXT3. */
+  64U, /*!< BC3, aka DXT4 and DXT5. */
+  0U,  /*!< BC4. */
+  64U, /*!< BC5. */
+  0U,  /*!< BC6h HDR format. */
+  0U,  /*!< BC7. */
+  0U,  /*!< ETC2 no alpha. */
+  0U,  /*!< ETC2 punch-through alpha. */
+  64U, /*!< ETC2 independent alpha. */
+  0U,  /*!< R11 ETC2 single-channel. */
+  64U, /*!< R11G11 ETC2 dual-channel. */
+  0U,  /*!< ASTC. */
+  0U,  /*!< ETC1S. */
+  0U,  /*!< PVRTC. */
+  0U   /*!< PVRTC2. */
+};
+
+static uint32_t compChannelBits[] = {
+  64U,  /*!< BC1, aka DXT1, no alpha. */
+  64U,  /*!< BC1, aka DXT1, punch-through alpha. */
+  64U,  /*!< BC2, aka DXT2 and DXT3. */
+  64U,  /*!< BC3, aka DXT4 and DXT5. */
+  64U,  /*!< BC4. */
+  64U,  /*!< BC5. */
+  128U, /*!< BC6h HDR format. */
+  128U, /*!< BC7. */
+  64U,  /*!< ETC2 no alpha. */
+  64U,  /*!< ETC2 punch-through alpha. */
+  64U,  /*!< ETC2 independent alpha. */
+  64U,  /*!< R11 ETC2 single-channel. */
+  64U,  /*!< R11G11 ETC2 dual-channel. */
+  128U, /*!< ASTC. */
+  64U,  /*!< ETC1S. */
+  64U,  /*!< PVRTC. */
+  64U   /*!< PVRTC2. */
+};
+
+static uint32_t compBytes[] = {
+  8U,  /*!< BC1, aka DXT1, no alpha. */
+  8U,  /*!< BC1, aka DXT1, punch-through alpha. */
+  16U, /*!< BC2, aka DXT2 and DXT3. */
+  16U, /*!< BC3, aka DXT4 and DXT5. */
+  8U,  /*!< BC4. */
+  16U, /*!< BC5. */
+  16U, /*!< BC6h HDR format. */
+  16U, /*!< BC7. */
+  8U,  /*!< ETC2 no alpha. */
+  8U,  /*!< ETC2 punch-through alpha. */
+  16U, /*!< ETC2 independent alpha. */
+  8U,  /*!< R11 ETC2 single-channel. */
+  16U, /*!< R11G11 ETC2 dual-channel. */
+  16U, /*!< ASTC. */
+  8U,  /*!< ETC1S. */
+  8U,  /*!< PVRTC. */
+  8U   /*!< PVRTC2. */
+};
+
+/** Compression scheme, in Vulkan terms. */
+enum class comp_scheme {
+  BC1_RGB,       /*!< BC1, aka DXT1, no alpha. */
+  BC1_RGBA,      /*!< BC1, aka DXT1, punch-through alpha. */
+  BC2,           /*!< BC2, aka DXT2 and DXT3. */
+  BC3,           /*!< BC3, aka DXT4 and DXT5. */
+  BC4,           /*!< BC4. */
+  BC5,           /*!< BC5. */
+  BC6H,          /*!< BC6h HDR format. */
+  BC7,           /*!< BC7. */
+  ETC2_R8G8B8,   /*!< ETC2 no alpha. */
+  ETC2_R8G8B8A1, /*!< ETC2 punch-through alpha. */
+  ETC2_R8G8B8A8, /*!< ETC2 independent alpha. */
+  EAC_R11,       /*!< R11 ETC2 single-channel. */
+  EAC_R11G11,    /*!< R11G11 ETC2 dual-channel. */
+  ASTC,          /*!< ASTC. */
+  ETC1S,         /*!< ETC1S. */
+  PVRTC,         /*!< PVRTC(1). */
+  PVRTC2         /*!< PVRTC2. */
+};
+
+size_t dfd_write_comp(u32 *_dst, comp_scheme _comp, int _bwidth, int _bheight, int _bdepth, format_suffix _suffix) {
+  uint32_t numSamples = compSampleCount[(int)_comp];
+  uint32_t* BDFD = _dst + 1;
+  uint32_t *sample;
+  uint32_t channel;
+  // Use union to avoid type-punning complaints from gcc optimizer
+  // with -Wall.
+  union {
+      uint32_t i;
+      float f;
+  } lower, upper;
+
+  BDFD[KHR_DF_WORD_VENDORID] =
+          (KHR_DF_VENDORID_KHRONOS << KHR_DF_SHIFT_VENDORID) |
+          (KHR_DF_KHR_DESCRIPTORTYPE_BASICFORMAT << KHR_DF_SHIFT_DESCRIPTORTYPE);
+  BDFD[KHR_DF_WORD_VERSIONNUMBER] =
+          (KHR_DF_VERSIONNUMBER_LATEST << KHR_DF_SHIFT_VERSIONNUMBER) |
+          (((uint32_t)sizeof(uint32_t) *
+          (KHR_DF_WORD_SAMPLESTART +
+          numSamples * KHR_DF_WORD_SAMPLEWORDS)
+          << KHR_DF_SHIFT_DESCRIPTORBLOCKSIZE));
+  BDFD[KHR_DF_WORD_MODEL] =
+          ((compModelMapping[(int)_comp] << KHR_DF_SHIFT_MODEL) |
+           (KHR_DF_PRIMARIES_BT709 << KHR_DF_SHIFT_PRIMARIES) | /* Assumed */
+          (KHR_DF_FLAG_ALPHA_STRAIGHT << KHR_DF_SHIFT_FLAGS));
+
+  if (_suffix == format_suffix::SRGB) {
+    BDFD[KHR_DF_WORD_TRANSFER] |= KHR_DF_TRANSFER_SRGB << KHR_DF_SHIFT_TRANSFER;
+  } else {
+    BDFD[KHR_DF_WORD_TRANSFER] |= KHR_DF_TRANSFER_LINEAR << KHR_DF_SHIFT_TRANSFER;
+  }
+  BDFD[KHR_DF_WORD_TEXELBLOCKDIMENSION0] =
+          (_bwidth - 1) | ((_bheight - 1) << KHR_DF_SHIFT_TEXELBLOCKDIMENSION1) | ((_bdepth - 1) << KHR_DF_SHIFT_TEXELBLOCKDIMENSION2);
+  /* bytesPlane0 = bytes, bytesPlane3..1 = 0 */
+  BDFD[KHR_DF_WORD_BYTESPLANE0] = compBytes[(int)_comp];
+  BDFD[KHR_DF_WORD_BYTESPLANE4] = 0; /* bytesPlane7..5 = 0 */
+
+  sample = BDFD + KHR_DF_WORD_SAMPLESTART;
+  channel = compFirstChannel[(int)_comp];
+  channel = dfd_channel_flags(channel, _suffix);
+
+  sample[KHR_DF_SAMPLEWORD_BITOFFSET] =
+          (0 << KHR_DF_SAMPLESHIFT_BITOFFSET) |
+          ((compChannelBits[(int)_comp] - 1) << KHR_DF_SAMPLESHIFT_BITLENGTH) |
+          (channel << KHR_DF_SAMPLESHIFT_CHANNELID);
+
+  sample[KHR_DF_SAMPLEWORD_SAMPLEPOSITION_ALL] = 0;
+  switch (_suffix) {
+    case format_suffix::UNORM: [[fallthrough]];
+    case format_suffix::SRGB:
+    default:
+      upper.i = 0xFFFFFFFFU;
+      lower.i = 0U;
+      break;
+    case format_suffix::SNORM:
+      upper.i = 0x7FFFFFFF;
+      lower.i = ~upper.i;
+      break;
+    case format_suffix::USCALED: [[fallthrough]];
+    case format_suffix::UINT:
+      upper.i = 1U;
+      lower.i = 0U;
+      break;
+    case format_suffix::SSCALED: [[fallthrough]];
+    case format_suffix::SINT:
+      upper.i = 1U;
+      lower.i = ~0U;
+      break;
+    case format_suffix::SFLOAT:
+      upper.f = 1.0f;
+      lower.f = -1.0f;
+      break;
+    case format_suffix::UFLOAT:
+      upper.f = 1.0f;
+      lower.f = 0.0f;
+      break;
+  }
+  sample[KHR_DF_SAMPLEWORD_SAMPLELOWER] = lower.i;
+  sample[KHR_DF_SAMPLEWORD_SAMPLEUPPER] = upper.i;
+
+  if (compSampleCount[(int)_comp] > 1) {
+    sample += KHR_DF_WORD_SAMPLEWORDS;
+    channel = compSecondChannel[(int)_comp];
+    channel = dfd_channel_flags(channel, _suffix);
+
+    sample[KHR_DF_SAMPLEWORD_BITOFFSET] =
+            (compSecondChannelOffset[(int)_comp] << KHR_DF_SAMPLESHIFT_BITOFFSET) |
+            ((compChannelBits[(int)_comp] - 1) << KHR_DF_SAMPLESHIFT_BITLENGTH) |
+            (channel << KHR_DF_SAMPLESHIFT_CHANNELID);
+
+    sample[KHR_DF_SAMPLEWORD_SAMPLEPOSITION_ALL] = 0;
+
+    sample[KHR_DF_SAMPLEWORD_SAMPLELOWER] = lower.i;
+    sample[KHR_DF_SAMPLEWORD_SAMPLEUPPER] = upper.i;
+  }
+  return sizeof(uint32_t) * (1 + KHR_DF_WORD_SAMPLESTART + numSamples * KHR_DF_WORD_SAMPLEWORDS);
+}
+
 size_t dfd_write(u32 *_dst, VkFormat _format) {
   switch (_format) {
     case VK_FORMAT_R8G8_UNORM: return dfd_write_unpacked(_dst, 2, 1, format_suffix::UNORM);
@@ -176,6 +435,8 @@ size_t dfd_write(u32 *_dst, VkFormat _format) {
     case VK_FORMAT_R16G16B16A16_UNORM: return dfd_write_unpacked(_dst, 4, 2, format_suffix::UNORM);
     case VK_FORMAT_R16G16B16A16_SFLOAT: return dfd_write_unpacked(_dst, 4, 2, format_suffix::SFLOAT);
     case VK_FORMAT_R32G32B32A32_SFLOAT: return dfd_write_unpacked(_dst, 4, 4, format_suffix::SFLOAT);
+    case VK_FORMAT_BC7_UNORM_BLOCK: return dfd_write_comp(_dst, comp_scheme::BC7, 4, 4, 1, format_suffix::UNORM);
+    case VK_FORMAT_BC7_SRGB_BLOCK: return dfd_write_comp(_dst, comp_scheme::BC7, 4, 4, 1, format_suffix::SRGB);
     default:
       throw runtime_error(sstream("unknown dfd for VkFormat: ") << _format);
       return -1;
@@ -352,7 +613,7 @@ struct cpu_image {
 
     rdo_bc::rdo_bc_params rp;
     switch(_target) {
-      case VK_FORMAT_BC7_SRGB_BLOCK: rp.m_dxgi_format = DXGI_FORMAT_BC7_UNORM_SRGB; break;
+      case VK_FORMAT_BC7_SRGB_BLOCK: /*rp.m_dxgi_format = DXGI_FORMAT_BC7_UNORM_SRGB; break;*/
       case VK_FORMAT_BC7_UNORM_BLOCK: rp.m_dxgi_format = DXGI_FORMAT_BC7_UNORM; break;
       default:
         throw runtime_error("unknown target format");
@@ -450,7 +711,7 @@ void gen_brdflut(const path &_output_file, display &_display, u16 _size) {
     std::cout << "\t\tgenerated " << _output_file << " level " << level << " in " << (high_resolution_clock::now() - start_level) << std::endl;
   }
 
-  //result.to_bc7();
+  result.to_bc7();
   result.write(_output_file);
 
   std::cout << "\tgenerated " << _output_file << " in " << (high_resolution_clock::now() - start_total) << std::endl;
@@ -513,7 +774,7 @@ void gen_irradiance(const path &_output_file, display &_display, const shared_im
 
   cpu_image result;
   result.size_ = {_size, _size};
-  result.format_ = VK_FORMAT_R32G32B32A32_SFLOAT;
+  result.format_ = VK_FORMAT_R8G8B8A8_SRGB;
 
   const uint levels = floor(std::log2(_size)) - 1;
   for (uint level = 0; level < levels; level++) {
@@ -559,7 +820,7 @@ void gen_irradiance(const path &_output_file, display &_display, const shared_im
     std::cout << "\t\tgenerated " << _output_file << " level " << level << " in " << (high_resolution_clock::now() - start_level) << std::endl;
   }
 
-  //result.to_bc7();
+  result.to_bc7();
   result.write(_output_file);
   std::cout << "\tgenerated " << _output_file << " in " << (high_resolution_clock::now() - start_total) << std::endl;
 /*#ifdef HUT_ENABLE_RENDERDOC
@@ -622,7 +883,7 @@ void gen_prefiltered(const path &_output_file, display &_display, const shared_i
 
   cpu_image result;
   result.size_ = {_size, _size};
-  result.format_ = VK_FORMAT_R32G32B32A32_SFLOAT;
+  result.format_ = VK_FORMAT_R8G8B8A8_SRGB;
 
   const uint levels = floor(std::log2(_size)) - 1;
   for (uint level = 0; level < levels; level++) {
@@ -669,7 +930,7 @@ void gen_prefiltered(const path &_output_file, display &_display, const shared_i
     std::cout << "\t\tgenerated " << _output_file << " level " << level << " in " << (high_resolution_clock::now() - start_level) << std::endl;
   }
 
-  //result.to_bc7();
+  result.to_bc7();
   result.write(_output_file);
   std::cout << "\tgenerated " << _output_file << " in " << (high_resolution_clock::now() - start_total) << std::endl;
 /*#ifdef HUT_ENABLE_RENDERDOC
