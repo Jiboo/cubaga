@@ -37,7 +37,7 @@
 #include "hut/window.hpp"
 
 #include "hut_ktx2.hpp"
-#include "imgui_impl_hut.hpp"
+#include "hut_imgui.hpp"
 
 #include "meshoptimizer.h"
 
@@ -120,6 +120,16 @@ struct texture {
     R8G8B8A8_UNORM = 3,
   };
 
+  static const char *format_name(VkFormat _format) {
+    switch (_format) {
+      case VK_FORMAT_BC7_SRGB_BLOCK: return "BC7_SRGB";
+      case VK_FORMAT_BC7_UNORM_BLOCK: return "BC7_UNORM";
+      case VK_FORMAT_R8G8B8A8_SRGB: return "R8G8B8A8_SRGB";
+      case VK_FORMAT_R8G8B8A8_UNORM: return "R8G8B8A8_UNORM";
+      default: return "INVALID";
+    }
+  }
+
   u16vec2 extents_;
   VkFormat format_;
   vector<data_layout> mips_;
@@ -181,7 +191,7 @@ struct mesh {
   };
   vector<lod> lods_;
 
-  uint8_t *parse(uint8_t *_input) {
+  u8 *parse(u8 *_input) {
     _input = read_vec3(_input, &translate_);
     _input = read_vec3(_input, &scale_);
     _input = read_u32(_input, &vertices_count_);
@@ -264,12 +274,12 @@ int main(int _argc, char **_argv) {
     return EXIT_FAILURE;
   }
   uint fcrb_size = fcrb.tellg();
-  unique_ptr<uint8_t[]> fcrb_data {new uint8_t[fcrb_size] };
+  unique_ptr<u8[]> fcrb_data {new u8[fcrb_size] };
   fcrb.seekg(0, ios::beg);
   fcrb.read((char*)fcrb_data.get(), fcrb_size);
   fcrb.close();
   cubaga crb;
-  uint8_t *crb_data = crb.parse(fcrb_data.get());
+  u8 *crb_data = crb.parse(fcrb_data.get());
   profile_log("cbr parsed");
 
   display d("cubaga-viewer");
@@ -281,7 +291,7 @@ int main(int _argc, char **_argv) {
   wparams.flags_ |= window_params::FDEPTH;
   window w(d, wparams);
   w.clear_color({1, 1, 1, 1});
-  w.title(sstream("cubaga-viewer ") << _argv[1] << " " << _argv[2] << " " << _argv[3]);
+  w.title(sstream("cubaga-viewer ") << _argv[1]);
 
   profile_log("hut::window created");
 
@@ -341,7 +351,8 @@ int main(int _argc, char **_argv) {
   });
 
   auto model_pipeline = make_unique<model_d>(w);
-  profile_log("model_pipeline initialized");
+  auto model_wpipeline = make_unique<model_d>(w, pipeline_params{.polygonMode_ = VK_POLYGON_MODE_LINE});
+  profile_log("model pipelines initialized");
 
   struct mesh_bufset {
     vector<model_d::shared_indices> indices_;
@@ -377,26 +388,37 @@ int main(int _argc, char **_argv) {
 
   profile_log("mesh staged");
 
-  auto import_tex = [&d, &crb, &crb_data](uint8_t _index) {
-    auto &tex = crb.textures_[_index];
+  shared_sampler samp = make_shared<sampler>(d);
 
+  struct texture_info {
+    shared_image image_;
+    ImTextureID texid_;
+  };
+  vector<texture_info> textures_info;
+  const auto textures_count = crb.textures_.size();
+  textures_info.resize(textures_count);
+  for (uint tex_id = 0; tex_id < textures_count; tex_id++) {
+    auto &tex = crb.textures_[tex_id];
+    auto &tinfo = textures_info[tex_id];
     image_params params;
     params.size_ = tex.extents_;
     params.format_ = tex.format_;
     params.tiling_ = VK_IMAGE_TILING_OPTIMAL;
     params.levels_ = tex.mips_.size();
 
-    auto result = std::make_shared<image>(d, params);
+    tinfo.image_ = std::make_shared<image>(d, params);
     for (u16 level = 0; level < tex.mips_.size(); level++) {
       auto data = span<const u8>{crb_data + tex.mips_[level].offset_, tex.mips_[level].size_};
       auto row_pixel_count = tex.extents_.x >> level;
       auto row_stride = (row_pixel_count * info(tex.format_).bpp()) / 8;
-      result->update({u16vec4{0, 0, tex.extents_ >> level}, level}, data, row_stride);
+      tinfo.image_->update({u16vec4{0, 0, tex.extents_ >> level}, level}, data, row_stride);
     }
-    return result;
-  };
+
+    tinfo.texid_ = ImGui_ImplHut_AddImage(tinfo.image_, samp);
+  }
+
   auto default_tex_rgba = [&d] (u8vec4 _color) {
-    auto data = span<uint8_t>{&_color.x, 4};
+    auto data = span<u8>{&_color.x, 4};
     image_params params;
     params.size_ = {1, 1};
     params.format_ = VK_FORMAT_R8G8B8A8_UNORM;
@@ -417,10 +439,10 @@ int main(int _argc, char **_argv) {
   for (uint material_id = 0; material_id < material_count; material_id++) {
     const auto &mat = crb.materials_[material_id];
     material_texsets.emplace_back(material_texset{
-        mat.albedo_ != 0xff ? import_tex(mat.albedo_) : deftex_white,
-        mat.emissive_ != 0xff ? import_tex(mat.emissive_) : deftex_black,
-        mat.normals_ != 0xff ? import_tex(mat.normals_) : deftex_normals,
-        mat.orm_ != 0xff ? import_tex(mat.orm_) : deftex_black});
+        mat.albedo_ != 0xff ? textures_info[mat.albedo_].image_ : deftex_white,
+        mat.emissive_ != 0xff ? textures_info[mat.emissive_].image_ : deftex_black,
+        mat.normals_ != 0xff ? textures_info[mat.normals_].image_ : deftex_normals,
+        mat.orm_ != 0xff ? textures_info[mat.orm_].image_ : deftex_black});
   }
 
   profile_log("textures staged");
@@ -451,7 +473,7 @@ int main(int _argc, char **_argv) {
   };
   int current_envmap_selection = 0;
 
-  profile_log("envmap staged");
+  profile_log("envmaps staged");
 
   const auto &default_mesh = crb.meshes_[current_mesh_selection];
   const auto &default_mat = crb.materials_[current_material_selection];
@@ -483,19 +505,22 @@ int main(int _argc, char **_argv) {
   };
   shared_ubo ubo = d.alloc_ubo(b, default_ubo);
 
-  auto maxLod = [](unsigned _px) -> unsigned { return std::floor(std::log2(_px)) - 2; };
-  shared_sampler samp = make_shared<sampler>(d);
-  shared_sampler samp_model = make_shared<sampler>(d, true, maxLod(1024));
-  shared_sampler samp_pre = make_shared<sampler>(d, true, maxLod(512));
-  shared_sampler samp_irr = make_shared<sampler>(d, true, maxLod(64));
+  auto maxLod = [](float _px) -> float { return std::floor(std::log2(_px)) - 2; };
+  shared_sampler samp_model = make_shared<sampler>(d, sampler_params{}.lod(maxLod(1024)));
+  shared_sampler samp_pre = make_shared<sampler>(d, sampler_params{}.lod(maxLod(512)));
+  shared_sampler samp_brdf = make_shared<sampler>(d, sampler_params{}.lod(maxLod(512)));
+  shared_sampler samp_irr = make_shared<sampler>(d, sampler_params{}.lod(maxLod(64)));
+  shared_sampler samp_skybox = make_shared<sampler>(d, sampler_params{}.lod(maxLod(512)));
 
   axis_pipeline->write(0, ubo);
   bool draw_axis = true;
+  bool draw_wireframe = false;
 
   size_t materials_count = std::max(size_t(1), material_texsets.size());
   size_t total_set_number = envmaps_texsets.size() * materials_count;
-  model_pipeline->alloc_next_descriptors(total_set_number - 1);
-  skybox_pipeline->alloc_next_descriptors(total_set_number - 1);
+  model_pipeline->resize_descriptors(total_set_number);
+  model_wpipeline->resize_descriptors(total_set_number);
+  skybox_pipeline->resize_descriptors(total_set_number);
   for (int material = 0; material < materials_count; material++) {
     for (int envmap = 0; envmap < envmaps_texsets.size(); envmap++) {
       uint descriptor_index = material * materials_count + envmap;
@@ -504,8 +529,12 @@ int main(int _argc, char **_argv) {
       model_pipeline->write(descriptor_index, ubo,
                             mat_texset.albedo_, samp_model, mat_texset.emissive_, samp_model,
                             mat_texset.normals_, samp_model, mat_texset.orm_, samp_model,
-                            env_texset.irr_, samp_irr, env_texset.pre_, samp_pre, brdflut, samp_pre);
-      skybox_pipeline->write(descriptor_index, ubo, env_texset.pre_, samp);
+                            env_texset.irr_, samp_irr, env_texset.pre_, samp_pre, brdflut, samp_brdf);
+      model_wpipeline->write(descriptor_index, ubo,
+                            mat_texset.albedo_, samp_model, mat_texset.emissive_, samp_model,
+                            mat_texset.normals_, samp_model, mat_texset.orm_, samp_model,
+                            env_texset.irr_, samp_irr, env_texset.pre_, samp_pre, brdflut, samp_brdf);
+      skybox_pipeline->write(descriptor_index, ubo, env_texset.pre_, samp_skybox);
     }
   }
 
@@ -514,8 +543,14 @@ int main(int _argc, char **_argv) {
   w.on_draw.connect([&](VkCommandBuffer _buffer) {
     uint descriptor_index = current_material_selection * materials_count + current_envmap_selection;
     auto &bufset = mesh_bufsets[current_mesh_selection];
-    model_pipeline->draw(_buffer, descriptor_index, bufset.indices_[current_lod_selection], model_instance, bufset.vertices_);
+
+    if (draw_wireframe)
+      model_wpipeline->draw(_buffer, descriptor_index, bufset.indices_[current_lod_selection], model_instance, bufset.vertices_);
+    else
+      model_pipeline->draw(_buffer, descriptor_index, bufset.indices_[current_lod_selection], model_instance, bufset.vertices_);
+
     skybox_pipeline->draw(_buffer, descriptor_index, skybox_indices, skybox_instance, skybox_vertices);
+
     if (draw_axis)
       axis_pipeline->draw(_buffer, 0, axis_indices, axis_instance, axis_vertices);
 
@@ -523,6 +558,39 @@ int main(int _argc, char **_argv) {
     ImGui::NewFrame();
 
     if (ImGui::Begin("Viewer")) {
+      const std::vector<const char*> envmap_names = {
+          "Chromatic",
+          "Directional",
+          "Neutral",
+          "Papermill",
+      };
+      ImGui::Combo("Envmap", &current_envmap_selection, envmap_names.data(), envmap_names.size());
+
+      ImGui::SliderInt("Material", &current_material_selection, 0, materials_count - 1);
+      if (ImGui::SliderInt("Model", &current_mesh_selection, 0, mesh_count - 1))
+        current_lod_selection = 0;
+      ImGui::SliderInt("Model LOD", &current_lod_selection, 0, bufset.indices_.size() - 1);
+
+      ImGui::Text("Mesh vertices %d (%.1fKiB)", bufset.vertices_->size(), (bufset.vertices_->size() * sizeof(model_d::vertex) / 1024.0));
+      ImGui::Text("LOD indices %d (%.1fKiB)", bufset.indices_[current_lod_selection]->size(), (bufset.indices_[current_lod_selection]->size() * sizeof(u16) / 1024.0));
+      ImGui::Text("Triangles %d", bufset.indices_[current_lod_selection]->size() / 3);
+
+      if (ImGui::DragScalarN("Color", ImGuiDataType_U8, &cpu_instance.color_roughness_, 3)) {
+        model_instance->update_subone(0, offsetof(model_d::instance, color_roughness_), sizeof(u8vec3), &cpu_instance.color_roughness_);
+      }
+      if (ImGui::DragScalarN("Roughness", ImGuiDataType_U8, &cpu_instance.color_roughness_[3], 1)) {
+        model_instance->update_subone(0, offsetof(model_d::instance, color_roughness_) + 3, sizeof(u8), &cpu_instance.color_roughness_[3]);
+      }
+      if (ImGui::DragScalarN("Emissive", ImGuiDataType_U8, &cpu_instance.emissive_metallic_, 3)) {
+        model_instance->update_subone(0, offsetof(model_d::instance, emissive_metallic_), sizeof(u8vec3), &cpu_instance.emissive_metallic_);
+      }
+      if (ImGui::DragScalarN("Metallic", ImGuiDataType_U8, &cpu_instance.emissive_metallic_[3], 1)) {
+        model_instance->update_subone(0, offsetof(model_d::instance, emissive_metallic_) + 3, sizeof(u8), &cpu_instance.emissive_metallic_[3]);
+      }
+    }
+    ImGui::End();
+
+    if (ImGui::Begin("Debug")) {
       if (ImGui::DragFloat2("Light direction", &light_rot.x, 1, -180, +180)) {
         auto light_dir = make_light_dir(light_rot);
         ubo->update_subone(0, offsetof(model_ubo, sun_dir_), sizeof(vec3), &light_dir);
@@ -541,29 +609,68 @@ int main(int _argc, char **_argv) {
         ubo->update_subone(0, offsetof(model_ubo, debug_), sizeof(int), &current_debug_selection);
       }
       ImGui::Checkbox("Draw axes (R=>X, G=>Y, Z=>B)", &draw_axis);
-      const std::vector<const char*> envmap_names = {
-          "Chromatic",
-          "Directional",
-          "Neutral",
-          "Papermill",
-      };
-      ImGui::Combo("Envmap", &current_envmap_selection, envmap_names.data(), envmap_names.size());
+      ImGui::Checkbox("Wireframe", &draw_wireframe);
 
-      // TODO Material selection
-      // TODO Mesh selection
-      // TODO LOD selection
+      ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+    }
+    ImGui::End();
 
-      if (ImGui::DragScalarN("Color", ImGuiDataType_U8, &cpu_instance.color_roughness_, 3)) {
-        model_instance->update_subone(0, offsetof(model_d::instance, color_roughness_), sizeof(u8vec3), &cpu_instance.color_roughness_);
+    if (ImGui::Begin("File stats")) {
+      ImGui::Text("File size: %.1fKiB", crb.data_size_ / 1024.0);
+      if (ImGui::TreeNode("Textures")) {
+        for (unsigned tex_id = 0; tex_id < crb.textures_.size(); tex_id++) {
+          auto &tex = crb.textures_[tex_id];
+          auto &tinfo = textures_info[tex_id];
+          float bpp = info(tex.format_).bpp();
+          if (ImGui::TreeNode(&tex, "Texture %d", tex_id)) {
+            ImGui::Text("Format: %s", texture::format_name(tex.format_));
+            ImGui::Text("Extents: %d,%d", tex.extents_.x, tex.extents_.y);
+
+            float total_size = 0;
+            for (unsigned mip_id = 0; mip_id < tex.mips_.size(); mip_id++) {
+              auto &mip = tex.mips_[mip_id];
+              ImVec2 img_size {float(tex.extents_.x>>mip_id), float(tex.extents_.y>>mip_id)};
+              total_size += (img_size.x * img_size.y * bpp) / (8.f * 1024);
+            }
+            ImGui::Text("Size: %.1fKiB", total_size);
+
+            for (unsigned mip_id = 0; mip_id < tex.mips_.size(); mip_id++) {
+              auto &mip = tex.mips_[mip_id];
+              if (ImGui::TreeNode(&mip, "Texture %d Mip %d", tex_id, mip_id)) {
+                ImVec2 img_size {float(tex.extents_.x>>mip_id), float(tex.extents_.y>>mip_id)};
+                ImGui::Text("Extents: %.0f,%.0f", img_size.x, img_size.y);
+                ImGui::Text("Size: %.1fKiB", (img_size.x * img_size.y * bpp) / (8.f * 1024));
+                ImGui::Image(tinfo.texid_, img_size);
+                ImGui::TreePop();
+              }
+            }
+
+            ImGui::TreePop();
+          }
+        }
+        ImGui::TreePop();
       }
-      if (ImGui::DragScalarN("Roughness", ImGuiDataType_U8, &cpu_instance.color_roughness_[3], 1)) {
-        model_instance->update_subone(0, offsetof(model_d::instance, color_roughness_) + 3, sizeof(u8), &cpu_instance.color_roughness_[3]);
-      }
-      if (ImGui::DragScalarN("Emissive", ImGuiDataType_U8, &cpu_instance.emissive_metallic_, 3)) {
-        model_instance->update_subone(0, offsetof(model_d::instance, emissive_metallic_), sizeof(u8vec3), &cpu_instance.emissive_metallic_);
-      }
-      if (ImGui::DragScalarN("Metallic", ImGuiDataType_U8, &cpu_instance.emissive_metallic_[3], 1)) {
-        model_instance->update_subone(0, offsetof(model_d::instance, emissive_metallic_) + 3, sizeof(u8), &cpu_instance.emissive_metallic_[3]);
+      if (ImGui::TreeNode("Meshes")) {
+        for (unsigned mesh_id = 0; mesh_id < crb.meshes_.size(); mesh_id++) {
+          auto &mesh = crb.meshes_[mesh_id];
+          if (ImGui::TreeNode(&mesh, "Mesh %d", mesh_id)) {
+            auto &mbuf = mesh_bufsets[mesh_id];
+            ImGui::Text("Mesh vertices %d (%.1fKiB)", mbuf.vertices_->size(), float(mbuf.vertices_->size() * sizeof(model_d::vertex) / 1024.f));
+
+            for (unsigned lod_id = 0; lod_id < mbuf.indices_.size(); lod_id++) {
+              if (ImGui::TreeNode(&mesh, "Mesh %d LOD %d", mesh_id, lod_id)) {
+                auto &indices = bufset.indices_[lod_id];
+                ImGui::Text("LOD indices %d (%.1fKiB)", indices->size(), float(indices->size() * sizeof(u16) / 1024.f));
+                ImGui::Text("Triangles %d", indices->size() / 3);
+
+                ImGui::TreePop();
+              }
+            }
+
+            ImGui::TreePop();
+          }
+        }
+        ImGui::TreePop();
       }
     }
     ImGui::End();
@@ -580,7 +687,7 @@ int main(int _argc, char **_argv) {
     return false;
   });
 
-  w.on_mouse.connect([&](uint8_t _button, mouse_event_type _type, vec2 _pos) {
+  w.on_mouse.connect([&](u8 _button, mouse_event_type _type, vec2 _pos) {
     static bool button_clicked = false;
     static vec2 last_pos = {0, 0};
 
@@ -632,6 +739,12 @@ int main(int _argc, char **_argv) {
     d.post([&](auto){
       w.invalidate(true);
     });
+
+    static bool already_announced = false;
+    if (!already_announced) {
+      profile_log("first frame");
+      already_announced = true;
+    }
 
     return false;
   });

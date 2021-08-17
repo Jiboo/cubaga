@@ -44,7 +44,6 @@ and some models from [KhronosGroup/glTF-Sample-Models](https://github.com/Khrono
   - Allow importing complex models (more than 64k vertices) by simplifying them first
 - PbrGen:
   - The result is not on par with what Vulkan-glTF-PBR outputs
-  - Forcing brdf to red in shader, fixes some issues (white dot, and strange roughness behaviour), some might be wrong too
 - Viewer:
   - Currently, show one mesh+material from CLI, refactor to make it real browser of CRB files (view textures, any model, etc)
 - Debugger:

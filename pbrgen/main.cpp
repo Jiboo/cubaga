@@ -699,8 +699,9 @@ void gen_brdflut(const path &_output_file, display &_display, u16 _size) {
     });
 
     cpu_image::level lod;
-    auto &pixels = lod.layers_.emplace_back(new u8[level_size * byte_stride]);
-    ofs.download(pixels.get(), byte_stride);
+    auto size = level_size * byte_stride;
+    auto &pixels = lod.layers_.emplace_back(new u8[size]);
+    ofs.download(std::span<u8>(pixels.get(), size), byte_stride);
 
 #if defined(CUBAGA_PBRGEN_DEBUG)
     auto output = path(_output_file).replace_extension((sstream(".debug.level") << level << ".png").str()).u8string();
@@ -807,8 +808,9 @@ void gen_irradiance(const path &_output_file, display &_display, const shared_im
         pipeline->draw(_cb, 0, indices, irradiance_pipeline::shared_instances{}, vertices);
       });
 
-      auto &pixels = lod.layers_.emplace_back(new u8[byte_stride * level_size]);
-      ofs.download(pixels.get(), byte_stride);
+      auto size = byte_stride * level_size;
+      auto &pixels = lod.layers_.emplace_back(new u8[size]);
+      ofs.download(std::span<u8>(pixels.get(), size), byte_stride);
 
 #if defined(CUBAGA_PBRGEN_DEBUG)
       auto output = path(_output_file).replace_extension((sstream(".debug.level") << level << ".layer" << layer << ".png").str()).u8string();
@@ -917,8 +919,9 @@ void gen_prefiltered(const path &_output_file, display &_display, const shared_i
         pipeline->draw(_cb, 0, indices, prefiltered_pipeline::shared_instances{}, vertices);
       });
 
-      auto &pixels = lod.layers_.emplace_back(new u8[byte_stride * level_size]);
-      ofs.download(pixels.get(), byte_stride);
+      auto size = byte_stride * level_size;
+      auto &pixels = lod.layers_.emplace_back(new u8[size]);
+      ofs.download(span<u8>(pixels.get(), size), byte_stride);
 
 #if defined(CUBAGA_PBRGEN_DEBUG)
       auto output = path(_output_file).replace_extension((sstream(".debug.level") << level << ".layer" << layer << ".png").str()).u8string();
